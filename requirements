@@ -1,0 +1,9 @@
+# on Windows, MAC (Intel)
+Python: 3.10
+Tensorflow: 2.11.0
+Keras: 2.11.0
+pip uninstall tensorflow keras -y
+pip install tensorflow==2.11.0 keras==2.11.0
+Transformers: 4.26.1
+numpy<2
+pip install "numpy<2" "tensorflow==2.11.0" "transformers==4.29.2"
