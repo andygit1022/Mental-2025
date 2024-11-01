@@ -1,4 +1,6 @@
-from matplotlib import pyplot as plt
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
 import numpy as np
 import itertools
 
@@ -181,6 +183,7 @@ def plot_confusion_matrix(cm, classes,
     Normalization can be applied by setting `normalize=True`.
     """
     plt.ioff()
+    # plt.ion()
     plt.close()
     plt.figure()
     plt.imshow(cm, interpolation='nearest', cmap=cmap)

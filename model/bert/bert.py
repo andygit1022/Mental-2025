@@ -6,6 +6,10 @@ from transformers import DistilBertTokenizer, TFDistilBertModel
 import params as PARAMS
 from tensorflow.keras.models import Model
 
+from transformers import AutoTokenizer, TFAutoModel
+
+
+
 
 class DistilBERTEmbeddingLayer(Layer):
     def __init__(self, bert_model, **kwargs):
@@ -26,7 +30,9 @@ class DistilBERTEmbeddingLayer(Layer):
     @classmethod
     def from_config(cls, config):
         # Recreate the BERT model when loading the layer
-        bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
+        # bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
+
+        bert_model = TFAutoModel.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
         return cls(bert_model=bert_model, **config)
 
 
@@ -34,9 +40,10 @@ class Bert(BaseModel):
 
     def __init__(self, df):
         super().__init__(df)
-        self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
+        # self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
+        self.tokenizer = AutoTokenizer.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
 
-    def tokenize_feature(self, texts, max_length=512):
+    def tokenize_feature(self, texts, max_length=PARAMS.MAX_LEN):
         encoding = self.tokenizer(
             list(texts),
             max_length=max_length,
@@ -67,14 +74,15 @@ class Bert(BaseModel):
         self.data_loaded = True
 
     def build(self):
-        bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
+        # bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
+        bert_model = TFAutoModel.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
         shared_embedding_layer = DistilBERTEmbeddingLayer(bert_model=bert_model)
 
         feature_embeddings = []
         model_inputs = []
         for feature in PARAMS.FEATURES:
-            input_ids = Input(shape=(512,), dtype=tf.int32, name=f"{feature.replace(' ', '_')}_input_ids")
-            attention_mask = Input(shape=(512,), dtype=tf.int32, name=f"{feature.replace(' ', '_')}_attention_mask")
+            input_ids = Input(shape=(PARAMS.MAX_LEN,), dtype=tf.int32, name=f"{feature.replace(' ', '_')}_input_ids")
+            attention_mask = Input(shape=(PARAMS.MAX_LEN,), dtype=tf.int32, name=f"{feature.replace(' ', '_')}_attention_mask")
 
             # Get BERT embeddings for the feature using Lambda wrapper
             feature_embedding = shared_embedding_layer([input_ids, attention_mask])
@@ -85,9 +93,9 @@ class Bert(BaseModel):
 
         # Concatenate all feature embeddings and create classification layer
         concatenated_features = Concatenate()(feature_embeddings)
-        # output = Dense(100, activation='relu')(concatenated_features)
-        # output = Dense(100, activation='relu')(output)
-        output = Dense(PARAMS.NUM_CLASSES, activation='softmax')(concatenated_features)
+        output = Dense(50, activation='relu')(concatenated_features)
+        output = Dense(50, activation='relu')(output)
+        output = Dense(PARAMS.NUM_CLASSES, activation='softmax')(output)
 
         self.model = Model(inputs=model_inputs, outputs=output)
 
