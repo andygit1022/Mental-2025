@@ -319,7 +319,9 @@ df = pd.read_csv("template.csv")
 #     "Daily Living", "Personality and Behavior"
 # ]
 features = [
-    "Memory", "Language",
+    "Main Complaints", "Memory", "Language", "Orientation",
+    "Judgment and Problem Solving", "Social Activities", "Home and Hobbies",
+    "Daily Living", "Personality and Behavior"
 ]
 columns = ["Type"] + features
 df[features] = df[features].astype(str)

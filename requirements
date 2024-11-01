@@ -1,4 +1,4 @@
-# on Windows
+# on Windows, MAC (Intel)
 Python: 3.10
 Tensorflow: 2.11.0
 Keras: 2.11.0
