@@ -51,7 +51,14 @@ class BaseModel(ABC):
         if self.model is None:
             self.build()
 
-        optimizer = Adam(learning_rate=PARAMS.LEARNING_RATE)
+        first_decay_steps = PARAMS.EPOCHS_PER_CYCLE * int(len(self.train_df) / PARAMS.BATCH_SIZE)
+
+        cos_decay_ann = tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=PARAMS.LEARNING_RATE,
+                                                                          first_decay_steps=first_decay_steps,
+                                                                          t_mul=2, m_mul=0.9, alpha=0)
+        optimizer = tf.keras.optimizers.SGD(learning_rate=cos_decay_ann)
+        # optimizer = Adam(learning_rate=PARAMS.LEARNING_RATE)
+
         loss_fn = keras.losses.CategoricalCrossentropy()
         metrics = [keras.metrics.CategoricalAccuracy(),
                    keras.metrics.Precision(class_id=0),
@@ -91,3 +98,7 @@ class BaseModel(ABC):
 
         print(skm.classification_report(y_true, y_pred))
         plot_confusion_matrix(cm=cm, classes=PARAMS.CLASSES, title='confusion_matrix')
+
+        diff_idx = np.where(y_pred != y_true)[0]
+        print("Misclassifications")
+        print(self.val_df.iloc[diff_idx][["Patient_ID", "Label", "Age"]].to_string(index=False))

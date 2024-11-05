@@ -183,6 +183,7 @@ def plot_confusion_matrix(cm, classes,
     Normalization can be applied by setting `normalize=True`.
     """
     plt.ioff()
+    # plt.ion()
     plt.close()
     plt.figure()
     plt.imshow(cm, interpolation='nearest', cmap=cmap)
