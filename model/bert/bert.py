@@ -1,11 +1,12 @@
 from ..base_model import BaseModel
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from keras.layers import Input, Dense, Lambda, Concatenate, Layer
+from keras.layers import Input, Dense, Concatenate, Layer, MultiHeadAttention, LayerNormalization
 from transformers import DistilBertTokenizer, TFDistilBertModel
 import params as PARAMS
 from tensorflow.keras.models import Model
 import numpy as np
+from tensorflow.python.keras.utils.np_utils import to_categorical
 
 from transformers import AutoTokenizer, TFAutoModel
 
@@ -23,6 +24,7 @@ class DistilBERTEmbeddingLayer(Layer):
     def __init__(self, bert_model, **kwargs):
         super(DistilBERTEmbeddingLayer, self).__init__(**kwargs)
         self.bert_model = bert_model  # Reuse the passed DistilBERT model
+        self.bert_model.trainable = False
 
     def call(self, inputs):
         input_ids, attention_mask = inputs
@@ -40,6 +42,7 @@ class DistilBERTEmbeddingLayer(Layer):
         # Recreate the BERT model when loading the layer
         bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
         # bert_model = TFAutoModel.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
+        bert_model.trainable = False
         return cls(bert_model=bert_model, **config)
 
 
@@ -136,13 +139,20 @@ class Bert(BaseModel):
         concatenated_features = Concatenate()(feature_embeddings)
 
         # Add dense layers for classification
-        output = Dense(100, activation='relu')(concatenated_features)
-        # output = Dense(50, activation='relu')(output)
-        initial_bias = compute_class_biases(self.train_labels)
+        output = Dense(128, activation='relu')(concatenated_features)
+        output = tf.expand_dims(output, axis=1)
+
+        attention_output = MultiHeadAttention(num_heads=4, key_dim=32)(output, output)
+        attention_output = LayerNormalization()(attention_output + output)
+        output = Dense(64, activation='relu')(attention_output)
+
+        train_labels = to_categorical(self.train_df['label_encoded'], num_classes=PARAMS.NUM_CLASSES)
+        initial_bias = compute_class_biases(train_labels)
 
         # Set the initial bias in the output layer
         output = Dense(PARAMS.NUM_CLASSES, activation='softmax',
                        bias_initializer=tf.keras.initializers.Constant(initial_bias))(output)
+        output = tf.squeeze(output, axis=1)
 
         self.model = Model(inputs=model_inputs, outputs=output)
 

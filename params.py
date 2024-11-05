@@ -6,7 +6,7 @@ NUM_CLASSES = len(CLASSES)
 
 FULL_FEATURES = {
     "Patient_ID": 'int32',
-    "Type": 'str',
+    "Label": 'str',
     "Gender": 'str',
     "Age": "int32",
     "Education": "int32",
@@ -38,15 +38,23 @@ FULL_FEATURES = {
 }
 FEATURES = [
     "Patient_ID",   # for loggig
-    "Age", "Main Complaints",
+    "Age",
+    "Main Complaints",
+    "Memory",
+    "Language",
+    "Orientation",
+    "Judgment and Problem Solving",
+    "Social Activities",
     "Home and Hobbies",
     "Daily Living",
+    "Personality and Behavior",
 ]
 
 # training parameters
-LEARNING_RATE = 5e-6
-EPOCHS = 2000
+LEARNING_RATE = 3e-5
+EPOCHS = 1000
 BATCH_SIZE = 4
+EPOCHS_PER_CYCLE = 4
 
 # bert
-MAX_LEN = 512
+MAX_LEN = 128

@@ -51,9 +51,11 @@ class BaseModel(ABC):
         if self.model is None:
             self.build()
 
+        first_decay_steps = PARAMS.EPOCHS_PER_CYCLE * int(len(self.train_df) / PARAMS.BATCH_SIZE)
+
         cos_decay_ann = tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=PARAMS.LEARNING_RATE,
-                                                                          first_decay_steps=500,
-                                                                          t_mul=1, m_mul=0.9, alpha=0)
+                                                                          first_decay_steps=first_decay_steps,
+                                                                          t_mul=2, m_mul=0.9, alpha=0)
         optimizer = tf.keras.optimizers.SGD(learning_rate=cos_decay_ann)
         # optimizer = Adam(learning_rate=PARAMS.LEARNING_RATE)
 
@@ -99,4 +101,4 @@ class BaseModel(ABC):
 
         diff_idx = np.where(y_pred != y_true)[0]
         print("Misclassifications")
-        print(self.val_df.iloc[diff_idx][["Patient_ID", "Type", "Age"]])
+        print(self.val_df.iloc[diff_idx][["Patient_ID", "Label", "Age"]].to_string(index=False))
