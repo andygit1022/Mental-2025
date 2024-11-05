@@ -91,3 +91,7 @@ class BaseModel(ABC):
 
         print(skm.classification_report(y_true, y_pred))
         plot_confusion_matrix(cm=cm, classes=PARAMS.CLASSES, title='confusion_matrix')
+
+        diff_idx = np.where(y_pred != y_true)[0]
+        print("Misclassifications")
+        print(self.val_df.iloc[diff_idx][["Patient_ID", "Type", "Age"]])

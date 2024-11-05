@@ -13,6 +13,8 @@ def read_data():
     label_encoder = LabelEncoder()
     df['label_encoded'] = label_encoder.fit_transform(df['Type'])
 
-    train_df, val_df = train_test_split(df, test_size=0.2, random_state=42)
+    # train_df, val_df = train_test_split(df, test_size=0.2, random_state=42)
+
+    train_df, val_df = train_test_split(df, test_size=0.2)
 
     return train_df, val_df
