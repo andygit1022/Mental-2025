@@ -4,13 +4,38 @@ DATASET_PATH = "data/dataset.csv"
 CLASSES = ["NC", "PRD"]
 NUM_CLASSES = len(CLASSES)
 
-# FEATURES = [
-#     "Literacy and Numeracy", "Medical History", "Medications", "Surgeries", "Stroke",
-#     "Other History", "Vision", "Hearing", "Diet", "Sleep", "Alcohol", "Smoking",
-#     "Family History", "Main Complaints", "Memory", "Language", "Orientation",
-#     "Judgment and Problem Solving", "Social Activities", "Home and Hobbies",
-#     "Daily Living", "Personality and Behavior"
-# ]
+FULL_FEATURES = {
+    "Patient_ID": 'int32',
+    "Type": 'str',
+    "Gender": 'str',
+    "Age": "int32",
+    "Education": "int32",
+    "Literacy and Numeracy": "str",
+    "Medical History": "str",
+    "Medications": "str",
+    "Surgeries": "str",
+    "Stroke": "str",
+    "Other History": "str",
+    "Vision": "str",
+    "Hearing": "str",
+    "Diet": "str",
+    "Sleep": "str",
+    "Alcohol": "str",
+    "Smoking": "str",
+    "Family History": "str",
+    "Main Complaints": "str",
+    "Memory": "str",
+    "Language": "str",
+    "Orientation": "str",
+    "Judgment and Problem Solving": "str",
+    "Social Activities": "str",
+    "Home and Hobbies": "str",
+    "Daily Living": "str",
+    "Personality and Behavior": "str",
+    # 'MMSE': 'int32',
+    # 'CIST': 'int32',
+    # 'GDS': 'int32'
+}
 FEATURES = [
     "Age", "Main Complaints", "Memory", "Language", "Orientation",
     "Judgment and Problem Solving", "Social Activities", "Home and Hobbies",

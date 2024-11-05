@@ -9,8 +9,6 @@ from tensorflow.keras.models import Model
 from transformers import AutoTokenizer, TFAutoModel
 
 
-
-
 class DistilBERTEmbeddingLayer(Layer):
     def __init__(self, bert_model, **kwargs):
         super(DistilBERTEmbeddingLayer, self).__init__(**kwargs)
@@ -57,19 +55,30 @@ class Bert(BaseModel):
     def make_dataset(self):
         super().make_dataset()
 
-        train_encodings = {feature: self.tokenize_feature(self.train_df[feature]) for feature in PARAMS.FEATURES}
-        val_encodings = {feature: self.tokenize_feature(self.val_df[feature]) for feature in PARAMS.FEATURES}
+        train_encodings = {
+            feature: self.tokenize_feature(self.train_df[feature])
+            for feature in PARAMS.FEATURES if PARAMS.FULL_FEATURES[feature] == 'str'
+        }
+
+        val_encodings = {
+            feature: self.tokenize_feature(self.val_df[feature])
+            for feature in PARAMS.FEATURES if PARAMS.FULL_FEATURES[feature] == 'str'
+        }
 
         self.train_inputs = {}
         self.val_inputs = {}
-
+        # string feautres
         for feature in PARAMS.FEATURES:
             # Remove spaces in feature names for compatibility with input layer names
             feature_key = feature.replace(" ", "_")
-            self.train_inputs[f"{feature_key}_input_ids"] = train_encodings[feature][0]
-            self.train_inputs[f"{feature_key}_attention_mask"] = train_encodings[feature][1]
-            self.val_inputs[f"{feature_key}_input_ids"] = val_encodings[feature][0]
-            self.val_inputs[f"{feature_key}_attention_mask"] = val_encodings[feature][1]
+            if PARAMS.FULL_FEATURES[feature] == 'str':
+                self.train_inputs[f"{feature_key}_input_ids"] = train_encodings[feature][0]
+                self.train_inputs[f"{feature_key}_attention_mask"] = train_encodings[feature][1]
+                self.val_inputs[f"{feature_key}_input_ids"] = val_encodings[feature][0]
+                self.val_inputs[f"{feature_key}_attention_mask"] = val_encodings[feature][1]
+            elif PARAMS.FULL_FEATURES[feature] == 'int32':
+                self.train_inputs[f"{feature_key}"] = tf.convert_to_tensor(self.train_df[feature], dtype=tf.float32)
+                self.val_inputs[f"{feature_key}"] = tf.convert_to_tensor(self.val_df[feature], dtype=tf.float32)
 
         self.data_loaded = True
 
@@ -81,18 +90,26 @@ class Bert(BaseModel):
         feature_embeddings = []
         model_inputs = []
         for feature in PARAMS.FEATURES:
-            input_ids = Input(shape=(PARAMS.MAX_LEN,), dtype=tf.int32, name=f"{feature.replace(' ', '_')}_input_ids")
-            attention_mask = Input(shape=(PARAMS.MAX_LEN,), dtype=tf.int32, name=f"{feature.replace(' ', '_')}_attention_mask")
+            feature_key = feature.replace(" ", "_")
+            if PARAMS.FULL_FEATURES[feature] == 'str':
+                input_ids = Input(shape=(PARAMS.MAX_LEN,), dtype=tf.int32, name=f"{feature_key}_input_ids")
+                attention_mask = Input(shape=(PARAMS.MAX_LEN,), dtype=tf.int32, name=f"{feature_key}_attention_mask")
 
-            # Get BERT embeddings for the feature using Lambda wrapper
-            feature_embedding = shared_embedding_layer([input_ids, attention_mask])
-            feature_embeddings.append(feature_embedding)
+                # Get BERT embeddings for text features
+                feature_embedding = shared_embedding_layer([input_ids, attention_mask])
+                feature_embeddings.append(feature_embedding)
+                model_inputs.extend([input_ids, attention_mask])
 
-            # Add to model inputs
-            model_inputs.extend([input_ids, attention_mask])
 
-        # Concatenate all feature embeddings and create classification layer
+            elif PARAMS.FULL_FEATURES[feature] == 'int32':
+                int_input = Input(shape=(1,), dtype=tf.float32, name=f"{feature_key}")
+                feature_embeddings.append(int_input)
+                model_inputs.append(int_input)
+
+            # Concatenate all feature embeddings
         concatenated_features = Concatenate()(feature_embeddings)
+
+        # Add dense layers for classification
         output = Dense(50, activation='relu')(concatenated_features)
         output = Dense(50, activation='relu')(output)
         output = Dense(PARAMS.NUM_CLASSES, activation='softmax')(output)

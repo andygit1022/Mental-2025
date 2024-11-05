@@ -7,7 +7,7 @@ from sklearn.preprocessing import LabelEncoder
 def read_data():
     df = pd.read_csv(PARAMS.DATASET_PATH)
     columns = ["Type"] + PARAMS.FEATURES
-    df[PARAMS.FEATURES] = df[PARAMS.FEATURES].astype(str)
+    df = df.astype(PARAMS.FULL_FEATURES)
     df = df[columns]
 
     label_encoder = LabelEncoder()
