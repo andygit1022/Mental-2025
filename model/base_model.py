@@ -51,7 +51,12 @@ class BaseModel(ABC):
         if self.model is None:
             self.build()
 
-        optimizer = Adam(learning_rate=PARAMS.LEARNING_RATE)
+        cos_decay_ann = tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=PARAMS.LEARNING_RATE,
+                                                                          first_decay_steps=500,
+                                                                          t_mul=1, m_mul=0.9, alpha=0)
+        optimizer = tf.keras.optimizers.SGD(learning_rate=cos_decay_ann)
+        # optimizer = Adam(learning_rate=PARAMS.LEARNING_RATE)
+
         loss_fn = keras.losses.CategoricalCrossentropy()
         metrics = [keras.metrics.CategoricalAccuracy(),
                    keras.metrics.Precision(class_id=0),
