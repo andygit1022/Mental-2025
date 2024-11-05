@@ -28,9 +28,8 @@ class DistilBERTEmbeddingLayer(Layer):
     @classmethod
     def from_config(cls, config):
         # Recreate the BERT model when loading the layer
-        # bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
-
-        bert_model = TFAutoModel.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
+        bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
+        # bert_model = TFAutoModel.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
         return cls(bert_model=bert_model, **config)
 
 
@@ -38,8 +37,8 @@ class Bert(BaseModel):
 
     def __init__(self, df):
         super().__init__(df)
-        # self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
-        self.tokenizer = AutoTokenizer.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
+        self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
+        # self.tokenizer = AutoTokenizer.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
 
     def tokenize_feature(self, texts, max_length=PARAMS.MAX_LEN):
         encoding = self.tokenizer(
@@ -69,6 +68,8 @@ class Bert(BaseModel):
         self.val_inputs = {}
         # string feautres
         for feature in PARAMS.FEATURES:
+            if feature == "Patient_ID":
+                continue
             # Remove spaces in feature names for compatibility with input layer names
             feature_key = feature.replace(" ", "_")
             if PARAMS.FULL_FEATURES[feature] == 'str':
@@ -83,13 +84,15 @@ class Bert(BaseModel):
         self.data_loaded = True
 
     def build(self):
-        # bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
-        bert_model = TFAutoModel.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
+        bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
+        # bert_model = TFAutoModel.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
         shared_embedding_layer = DistilBERTEmbeddingLayer(bert_model=bert_model)
 
         feature_embeddings = []
         model_inputs = []
         for feature in PARAMS.FEATURES:
+            if feature == "Patient_ID":
+                continue
             feature_key = feature.replace(" ", "_")
             if PARAMS.FULL_FEATURES[feature] == 'str':
                 input_ids = Input(shape=(PARAMS.MAX_LEN,), dtype=tf.int32, name=f"{feature_key}_input_ids")
@@ -100,7 +103,6 @@ class Bert(BaseModel):
                 feature_embeddings.append(feature_embedding)
                 model_inputs.extend([input_ids, attention_mask])
 
-
             elif PARAMS.FULL_FEATURES[feature] == 'int32':
                 int_input = Input(shape=(1,), dtype=tf.float32, name=f"{feature_key}")
                 feature_embeddings.append(int_input)
@@ -110,8 +112,8 @@ class Bert(BaseModel):
         concatenated_features = Concatenate()(feature_embeddings)
 
         # Add dense layers for classification
-        output = Dense(50, activation='relu')(concatenated_features)
-        output = Dense(50, activation='relu')(output)
+        output = Dense(100, activation='relu')(concatenated_features)
+        # output = Dense(50, activation='relu')(output)
         output = Dense(PARAMS.NUM_CLASSES, activation='softmax')(output)
 
         self.model = Model(inputs=model_inputs, outputs=output)

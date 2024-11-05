@@ -37,14 +37,15 @@ FULL_FEATURES = {
     # 'GDS': 'int32'
 }
 FEATURES = [
-    "Age", "Main Complaints", "Memory", "Language", "Orientation",
-    "Judgment and Problem Solving", "Social Activities", "Home and Hobbies",
-    "Daily Living", "Personality and Behavior"
+    "Patient_ID",   # for loggig
+    "Age", "Main Complaints",
+    "Home and Hobbies",
+    "Daily Living",
 ]
 
 # training parameters
 LEARNING_RATE = 5e-6
-EPOCHS = 200
+EPOCHS = 2000
 BATCH_SIZE = 4
 
 # bert
