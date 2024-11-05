@@ -55,7 +55,7 @@ class BaseModel(ABC):
 
         cos_decay_ann = tf.keras.optimizers.schedules.CosineDecayRestarts(initial_learning_rate=PARAMS.LEARNING_RATE,
                                                                           first_decay_steps=first_decay_steps,
-                                                                          t_mul=2, m_mul=0.9, alpha=0)
+                                                                          t_mul=1.2, m_mul=0.99, alpha=0)
         optimizer = tf.keras.optimizers.SGD(learning_rate=cos_decay_ann)
         # optimizer = Adam(learning_rate=PARAMS.LEARNING_RATE)
 

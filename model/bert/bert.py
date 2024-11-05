@@ -24,7 +24,7 @@ class DistilBERTEmbeddingLayer(Layer):
     def __init__(self, bert_model, **kwargs):
         super(DistilBERTEmbeddingLayer, self).__init__(**kwargs)
         self.bert_model = bert_model  # Reuse the passed DistilBERT model
-        self.bert_model.trainable = False
+        # self.bert_model.trainable = False
 
     def call(self, inputs):
         input_ids, attention_mask = inputs
@@ -42,7 +42,7 @@ class DistilBERTEmbeddingLayer(Layer):
         # Recreate the BERT model when loading the layer
         bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
         # bert_model = TFAutoModel.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
-        bert_model.trainable = False
+        # bert_model.trainable = False
         return cls(bert_model=bert_model, **config)
 
 
@@ -145,13 +145,13 @@ class Bert(BaseModel):
         attention_output = MultiHeadAttention(num_heads=4, key_dim=32)(output, output)
         attention_output = LayerNormalization()(attention_output + output)
         output = Dense(64, activation='relu')(attention_output)
+        output = Dense(32, activation='relu')(output)
 
         train_labels = to_categorical(self.train_df['label_encoded'], num_classes=PARAMS.NUM_CLASSES)
         initial_bias = compute_class_biases(train_labels)
-
-        # Set the initial bias in the output layer
         output = Dense(PARAMS.NUM_CLASSES, activation='softmax',
                        bias_initializer=tf.keras.initializers.Constant(initial_bias))(output)
+        # output = Dense(PARAMS.NUM_CLASSES, activation='softmax')(output)
         output = tf.squeeze(output, axis=1)
 
         self.model = Model(inputs=model_inputs, outputs=output)
