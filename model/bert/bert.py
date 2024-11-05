@@ -5,9 +5,19 @@ from keras.layers import Input, Dense, Lambda, Concatenate, Layer
 from transformers import DistilBertTokenizer, TFDistilBertModel
 import params as PARAMS
 from tensorflow.keras.models import Model
+import numpy as np
 
 from transformers import AutoTokenizer, TFAutoModel
 
+
+def compute_class_biases(labels):
+    # Assuming labels are one-hot encoded, calculate the class distribution
+    class_totals = np.sum(labels, axis=0)
+    class_probs = class_totals / np.sum(class_totals)
+
+    # Calculate logit bias: log(p / (1 - p)) for each class
+    initial_bias = np.log(class_probs / (1 - class_probs))
+    return initial_bias
 
 class DistilBERTEmbeddingLayer(Layer):
     def __init__(self, bert_model, **kwargs):
@@ -128,7 +138,11 @@ class Bert(BaseModel):
         # Add dense layers for classification
         output = Dense(100, activation='relu')(concatenated_features)
         # output = Dense(50, activation='relu')(output)
-        output = Dense(PARAMS.NUM_CLASSES, activation='softmax')(output)
+        initial_bias = compute_class_biases(self.train_labels)
+
+        # Set the initial bias in the output layer
+        output = Dense(PARAMS.NUM_CLASSES, activation='softmax',
+                       bias_initializer=tf.keras.initializers.Constant(initial_bias))(output)
 
         self.model = Model(inputs=model_inputs, outputs=output)
 
