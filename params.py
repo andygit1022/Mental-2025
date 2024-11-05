@@ -51,7 +51,7 @@ FEATURES = [
 ]
 
 # training parameters
-LEARNING_RATE = 3e-5
+LEARNING_RATE = 5e-5
 EPOCHS = 1000
 BATCH_SIZE = 4
 EPOCHS_PER_CYCLE = 4
