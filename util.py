@@ -5,10 +5,11 @@ from sklearn.preprocessing import LabelEncoder
 
 
 def read_data():
-    df = pd.read_csv(PARAMS.DATASET_PATH)
+    df = pd.read_csv(PARAMS.DATASET_PATH, encoding_errors="ignore")
     columns = ["Type"] + PARAMS.FEATURES
     df = df.astype(PARAMS.FULL_FEATURES)
     df = df[columns]
+    max_lengths = df.applymap(lambda x: len(str(x))).max()
 
     label_encoder = LabelEncoder()
     df['label_encoded'] = label_encoder.fit_transform(df['Type'])

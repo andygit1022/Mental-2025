@@ -66,6 +66,12 @@ class Bert(BaseModel):
 
         self.train_inputs = {}
         self.val_inputs = {}
+
+        self.token_counts = {
+            'train': {},
+            'val': {}
+        }
+
         # string feautres
         for feature in PARAMS.FEATURES:
             if feature == "Patient_ID":
@@ -77,6 +83,14 @@ class Bert(BaseModel):
                 self.train_inputs[f"{feature_key}_attention_mask"] = train_encodings[feature][1]
                 self.val_inputs[f"{feature_key}_input_ids"] = val_encodings[feature][0]
                 self.val_inputs[f"{feature_key}_attention_mask"] = val_encodings[feature][1]
+
+                self.token_counts['train'][feature_key] = [
+                    len(self.tokenizer.tokenize(text)) for text in self.train_df[feature]
+                ]
+                self.token_counts['val'][feature_key] = [
+                    len(self.tokenizer.tokenize(text)) for text in self.val_df[feature]
+                ]
+
             elif PARAMS.FULL_FEATURES[feature] == 'int32':
                 self.train_inputs[f"{feature_key}"] = tf.convert_to_tensor(self.train_df[feature], dtype=tf.float32)
                 self.val_inputs[f"{feature_key}"] = tf.convert_to_tensor(self.val_df[feature], dtype=tf.float32)
