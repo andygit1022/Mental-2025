@@ -137,21 +137,21 @@ class Bert(BaseModel):
                 feature_embedding = Input(shape=(1,), dtype=tf.float32, name=f"{feature_key}")
                 model_inputs.append(feature_embedding)
 
-            feature_proj = Dense(128)(feature_embedding)
+            feature_proj = Dense(256)(feature_embedding)
             feature_embeddings.append(feature_proj)
 
         concatenated_features = tf.stack(feature_embeddings, axis=1)
 
         # Attention layer to capture attention scores
-        attention_layer = MultiHeadAttention(num_heads=4, key_dim=32)
+        attention_layer = MultiHeadAttention(num_heads=4, key_dim=256//4)
         attention_output, attention_scores = attention_layer(concatenated_features, concatenated_features, return_attention_scores=True)
         attention_output = LayerNormalization()(attention_output + concatenated_features)
 
         # Add dense layers for classification
         fl_output = Flatten()(attention_output)
-        output = Dense(128, activation='relu')(fl_output)
-        output = Dense(64, activation='relu')(output)
-        output = Dense(32, activation='relu')(output)
+        output = Dense(64, activation='relu')(fl_output)
+        # output = Dense(64, activation='relu')(output)
+        output = Dense(16, activation='relu')(output)
 
         train_labels = to_categorical(self.train_df['label_encoded'], num_classes=PARAMS.NUM_CLASSES)
         initial_bias = compute_class_biases(train_labels)

@@ -25,7 +25,7 @@ def main():
     train_df, val_df = read_data()
     df = (train_df, val_df)
     model = Bert(df)
-    model.train()
+    # model.train()
     model.test()
 
 
