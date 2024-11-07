@@ -96,28 +96,16 @@ class BaseModel(ABC):
         if not self.data_loaded:
             self.make_dataset()
 
-        o_pred = self.model.predict(self.val_inputs)
-
         intermediate_layer_model = tf.keras.Model(inputs=self.model.input,
                                                   outputs=self.model.get_layer("multi_head_attention").output)
 
         intermediate_output = intermediate_layer_model.predict(self.train_inputs)
 
-        attention_score = np.squeeze(intermediate_output[0])
-        attention_score_result = np.zeros(shape=(16, 10))
-        idx = 0
-        p = 0
-        for feature in PARAMS.FEATURES:
-            if feature == "Patient_ID":
-                continue
-            if PARAMS.FULL_FEATURES[feature] == 'str':
-                attention_score_result[:, p] = np.mean(attention_score[:, np.arange(idx, idx+768, 2)], axis=1).reshape(1,-1)
-                idx += 768
-            elif PARAMS.FULL_FEATURES[feature] == 'int32':
-                attention_score_result[:, p] = np.mean(attention_score[:, idx:idx+1], axis=1).reshape(1,-1)
-                idx += 1
-            p += 1
-        plot_attention_scores(attention_score_result, feature_labels=PARAMS.FEATURES[1:])
+        attention_score = np.mean(intermediate_output[1], axis=(0,1))
+        np.savetxt("attention_score.csv", attention_score, delimiter=",", fmt='%f')
+        plot_attention_scores(attention_score, feature_labels=PARAMS.FEATURES[1:])
+
+        o_pred = self.model.predict(self.val_inputs)
 
         pred = to_categorical(tf.argmax(o_pred, axis=1), num_classes=2)
         y_pred = np.argmax(pred, axis=1)

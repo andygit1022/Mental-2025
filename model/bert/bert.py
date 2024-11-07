@@ -1,7 +1,7 @@
 from ..base_model import BaseModel
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from keras.layers import Input, Dense, Concatenate, Layer, MultiHeadAttention, LayerNormalization
+from keras.layers import Input, Dense, Concatenate, Layer, MultiHeadAttention, LayerNormalization, Flatten
 from transformers import DistilBertTokenizer, TFDistilBertModel
 import params as PARAMS
 from tensorflow.keras.models import Model
@@ -24,7 +24,7 @@ class DistilBERTEmbeddingLayer(Layer):
     def __init__(self, bert_model, **kwargs):
         super(DistilBERTEmbeddingLayer, self).__init__(**kwargs)
         self.bert_model = bert_model  # Reuse the passed DistilBERT model
-        self.bert_model.trainable = False
+        # self.bert_model.trainable = False
 
     def call(self, inputs):
         input_ids, attention_mask = inputs
@@ -42,7 +42,7 @@ class DistilBERTEmbeddingLayer(Layer):
         # Recreate the BERT model when loading the layer
         bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
         # bert_model = TFAutoModel.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
-        bert_model.trainable = False
+        # bert_model.trainable = False
         return cls(bert_model=bert_model, **config)
 
 
@@ -131,26 +131,25 @@ class Bert(BaseModel):
 
                 # Get BERT embeddings for text features
                 feature_embedding = shared_embedding_layer([input_ids, attention_mask])
-                feature_embeddings.append(feature_embedding)
                 model_inputs.extend([input_ids, attention_mask])
 
             elif PARAMS.FULL_FEATURES[feature] == 'int32':
-                int_input = Input(shape=(1,), dtype=tf.float32, name=f"{feature_key}")
-                feature_embeddings.append(int_input)
-                model_inputs.append(int_input)
+                feature_embedding = Input(shape=(1,), dtype=tf.float32, name=f"{feature_key}")
+                model_inputs.append(feature_embedding)
 
-            # Concatenate all feature embeddings
-        concatenated_features = Concatenate()(feature_embeddings)
-        concatenated_features = tf.expand_dims(concatenated_features, axis=1)
+            feature_proj = Dense(128)(feature_embedding)
+            feature_embeddings.append(feature_proj)
+
+        concatenated_features = tf.stack(feature_embeddings, axis=1)
 
         # Attention layer to capture attention scores
         attention_layer = MultiHeadAttention(num_heads=4, key_dim=32)
         attention_output, attention_scores = attention_layer(concatenated_features, concatenated_features, return_attention_scores=True)
-        # attention_output = tf.reshape(attention_output, [-1, PARAMS.MAX_LEN])
         attention_output = LayerNormalization()(attention_output + concatenated_features)
 
         # Add dense layers for classification
-        output = Dense(128, activation='relu')(attention_output)
+        fl_output = Flatten()(attention_output)
+        output = Dense(128, activation='relu')(fl_output)
         output = Dense(64, activation='relu')(output)
         output = Dense(32, activation='relu')(output)
 
@@ -158,8 +157,6 @@ class Bert(BaseModel):
         initial_bias = compute_class_biases(train_labels)
         output = Dense(PARAMS.NUM_CLASSES, activation='softmax',
                        bias_initializer=tf.keras.initializers.Constant(initial_bias))(output)
-
-        output = tf.squeeze(output, axis=1)
 
         # Model outputs main classification output and attention scores
         self.model = Model(inputs=model_inputs, outputs=output)

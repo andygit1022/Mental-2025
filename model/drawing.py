@@ -15,7 +15,7 @@ def plot_attention_scores(attention_scores, feature_labels=None):
         attention_scores = attention_scores[0, 0]
 
     plt.figure(figsize=(10, 8))
-    sns.heatmap(attention_scores, annot=True, cmap='viridis', xticklabels=feature_labels, yticklabels=False)
+    sns.heatmap(attention_scores, annot=True, cmap='viridis', xticklabels=feature_labels, yticklabels=feature_labels)
     plt.title("Attention Score Heatmap")
     plt.xlabel("Query Positions")
     plt.ylabel("Key Positions")
