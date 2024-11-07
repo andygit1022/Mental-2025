@@ -1,7 +1,7 @@
 from ..base_model import BaseModel
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from keras.layers import Input, Dense, Concatenate, Layer, MultiHeadAttention, LayerNormalization
+from keras.layers import Input, Dense, Concatenate, Layer, MultiHeadAttention, LayerNormalization, Flatten
 from transformers import DistilBertTokenizer, TFDistilBertModel
 import params as PARAMS
 from tensorflow.keras.models import Model
@@ -77,26 +77,29 @@ class Bert(BaseModel):
             for feature in PARAMS.FEATURES if PARAMS.FULL_FEATURES[feature] == 'str'
         }
 
-        self.train_inputs = {}
-        self.val_inputs = {}
+        self.train_inputs = []
+        self.val_inputs = []
 
         self.token_counts = {
             'train': {},
             'val': {}
         }
 
-        # string feautres
+        # string features
         for feature in PARAMS.FEATURES:
             if feature == "Patient_ID":
                 continue
             # Remove spaces in feature names for compatibility with input layer names
             feature_key = feature.replace(" ", "_")
-            if PARAMS.FULL_FEATURES[feature] == 'str':
-                self.train_inputs[f"{feature_key}_input_ids"] = train_encodings[feature][0]
-                self.train_inputs[f"{feature_key}_attention_mask"] = train_encodings[feature][1]
-                self.val_inputs[f"{feature_key}_input_ids"] = val_encodings[feature][0]
-                self.val_inputs[f"{feature_key}_attention_mask"] = val_encodings[feature][1]
 
+            if PARAMS.FULL_FEATURES[feature] == 'str':
+                # Add input IDs and attention masks for train and val to their respective lists
+                self.train_inputs.append(train_encodings[feature][0])  # input IDs for train
+                self.train_inputs.append(train_encodings[feature][1])  # attention mask for train
+                self.val_inputs.append(val_encodings[feature][0])  # input IDs for val
+                self.val_inputs.append(val_encodings[feature][1])  # attention mask for val
+
+                # Update token counts as a dictionary if needed for analysis
                 self.token_counts['train'][feature_key] = [
                     len(self.tokenizer.tokenize(text)) for text in self.train_df[feature]
                 ]
@@ -105,8 +108,9 @@ class Bert(BaseModel):
                 ]
 
             elif PARAMS.FULL_FEATURES[feature] == 'int32':
-                self.train_inputs[f"{feature_key}"] = tf.convert_to_tensor(self.train_df[feature], dtype=tf.float32)
-                self.val_inputs[f"{feature_key}"] = tf.convert_to_tensor(self.val_df[feature], dtype=tf.float32)
+                # Add integer features to train and val lists
+                self.train_inputs.append(tf.convert_to_tensor(self.train_df[feature], dtype=tf.float32))
+                self.val_inputs.append(tf.convert_to_tensor(self.val_df[feature], dtype=tf.float32))
 
         self.data_loaded = True
 
@@ -127,33 +131,34 @@ class Bert(BaseModel):
 
                 # Get BERT embeddings for text features
                 feature_embedding = shared_embedding_layer([input_ids, attention_mask])
-                feature_embeddings.append(feature_embedding)
                 model_inputs.extend([input_ids, attention_mask])
 
             elif PARAMS.FULL_FEATURES[feature] == 'int32':
-                int_input = Input(shape=(1,), dtype=tf.float32, name=f"{feature_key}")
-                feature_embeddings.append(int_input)
-                model_inputs.append(int_input)
+                feature_embedding = Input(shape=(1,), dtype=tf.float32, name=f"{feature_key}")
+                model_inputs.append(feature_embedding)
 
-            # Concatenate all feature embeddings
-        concatenated_features = Concatenate()(feature_embeddings)
+            feature_proj = Dense(128)(feature_embedding)
+            feature_embeddings.append(feature_proj)
+
+        concatenated_features = tf.stack(feature_embeddings, axis=1)
+
+        # Attention layer to capture attention scores
+        attention_layer = MultiHeadAttention(num_heads=4, key_dim=32)
+        attention_output, attention_scores = attention_layer(concatenated_features, concatenated_features, return_attention_scores=True)
+        attention_output = LayerNormalization()(attention_output + concatenated_features)
 
         # Add dense layers for classification
-        output = Dense(128, activation='relu')(concatenated_features)
-        output = tf.expand_dims(output, axis=1)
-
-        attention_output = MultiHeadAttention(num_heads=4, key_dim=32)(output, output)
-        attention_output = LayerNormalization()(attention_output + output)
-        output = Dense(64, activation='relu')(attention_output)
+        fl_output = Flatten()(attention_output)
+        output = Dense(128, activation='relu')(fl_output)
+        output = Dense(64, activation='relu')(output)
         output = Dense(32, activation='relu')(output)
 
         train_labels = to_categorical(self.train_df['label_encoded'], num_classes=PARAMS.NUM_CLASSES)
         initial_bias = compute_class_biases(train_labels)
         output = Dense(PARAMS.NUM_CLASSES, activation='softmax',
                        bias_initializer=tf.keras.initializers.Constant(initial_bias))(output)
-        # output = Dense(PARAMS.NUM_CLASSES, activation='softmax')(output)
-        output = tf.squeeze(output, axis=1)
 
+        # Model outputs main classification output and attention scores
         self.model = Model(inputs=model_inputs, outputs=output)
 
     def test(self):

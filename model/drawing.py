@@ -1,8 +1,25 @@
 import matplotlib
+
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import numpy as np
 import itertools
+import seaborn as sns
+
+
+def plot_attention_scores(attention_scores, feature_labels=None):
+    # Convert attention scores to a numpy array if it's a tensor
+    attention_scores = np.array(attention_scores)
+    if attention_scores.ndim > 3:
+        # Extract the first head and sequence for simplicity if multiple heads are present
+        attention_scores = attention_scores[0, 0]
+
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(attention_scores, annot=True, cmap='viridis', xticklabels=feature_labels, yticklabels=feature_labels)
+    plt.title("Attention Score Heatmap")
+    plt.xlabel("Query Positions")
+    plt.ylabel("Key Positions")
+    plt.show()
 
 
 class DrawPlot:

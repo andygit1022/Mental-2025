@@ -1,6 +1,6 @@
 from keras.optimizers import Adam
 from tensorflow import keras
-from .drawing import DrawPlot, plot_confusion_matrix
+from .drawing import DrawPlot, plot_confusion_matrix, plot_attention_scores
 import params as PARAMS
 import sklearn.metrics as skm
 from sklearn.metrics import confusion_matrix
@@ -70,6 +70,9 @@ class BaseModel(ABC):
         self.model.summary()
 
         self.make_dataset()
+
+        train_tensor = tf.random.normal((16, 4, 1, 1))
+        val_tensor = tf.random.normal((4, 4, 1, 1))
         try:
             draw = DrawPlot(fn=self.fn)
             self.model.fit(
@@ -84,9 +87,23 @@ class BaseModel(ABC):
         except KeyboardInterrupt:
             pass
 
+    def get_attention_scores(self, input_data):
+        # Get the attention scores from the model by running inference
+        _, attention_scores = self.model.predict(input_data)
+        return attention_scores
+
     def test(self):
         if not self.data_loaded:
             self.make_dataset()
+
+        intermediate_layer_model = tf.keras.Model(inputs=self.model.input,
+                                                  outputs=self.model.get_layer("multi_head_attention").output)
+
+        intermediate_output = intermediate_layer_model.predict(self.train_inputs)
+
+        attention_score = np.mean(intermediate_output[1], axis=(0,1))
+        np.savetxt("attention_score.csv", attention_score, delimiter=",", fmt='%f')
+        plot_attention_scores(attention_score, feature_labels=PARAMS.FEATURES[1:])
 
         o_pred = self.model.predict(self.val_inputs)
 
