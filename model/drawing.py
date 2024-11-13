@@ -19,7 +19,7 @@ def plot_attention_scores(attention_scores, feature_labels=None):
     plt.title("Attention Score Heatmap")
     plt.xlabel("Query Positions")
     plt.ylabel("Key Positions")
-    plt.show()
+    plt.show(block=False)
 
 
 class DrawPlot:
@@ -199,9 +199,9 @@ def plot_confusion_matrix(cm, classes,
     This function prints and plots the confusion matrix.
     Normalization can be applied by setting `normalize=True`.
     """
-    plt.ioff()
+    # plt.ioff()
     # plt.ion()
-    plt.close()
+    # plt.close()
     plt.figure()
     plt.imshow(cm, interpolation='nearest', cmap=cmap)
     plt.title(title)
@@ -227,4 +227,4 @@ def plot_confusion_matrix(cm, classes,
     plt.tight_layout()
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
-    plt.show()
+    plt.show(block=True)
