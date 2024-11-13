@@ -58,3 +58,6 @@ EPOCHS_PER_CYCLE = 4
 
 # bert
 MAX_LEN = 128
+
+# llama
+LLAMA_MODEL_PATH = "./Llama3.1-8B-Instruct"
