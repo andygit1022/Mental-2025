@@ -1,8 +1,9 @@
-from ..base_model import BaseModel
+# from ..base_model import BaseModel
 import params as PARAMS
 import numpy as np
-from transformers import LlamaTokenizer, LlamaForSequenceClassification, LlamaConfig, LlamaForCausalLM, LlamaModel, LlamaPreTrainedModel
-# from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers import LlamaTokenizer, LlamaForSequenceClassification, LlamaConfig, LlamaForCausalLM, LlamaModel, \
+    LlamaPreTrainedModel
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from tensorflow.python.keras.utils.np_utils import to_categorical
 import torch
 import torch.nn as nn
@@ -11,8 +12,10 @@ from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from tqdm import tqdm  # For progress bar (optional)
 import numpy as np
 import torchmetrics
+from torch.utils.data import TensorDataset, DataLoader
 import os
-import sentencepiece as spm
+
+# import sentencepiece as spm
 
 # Check if CUDA is available
 print("CUDA available:", torch.cuda.is_available())
@@ -27,6 +30,7 @@ if torch.cuda.is_available():
 else:
     print("No CUDA devices found.")
 
+
 def compute_class_biases(labels):
     # Assuming labels are one-hot encoded, calculate the class distribution
     class_totals = np.sum(labels, axis=0)
@@ -36,13 +40,15 @@ def compute_class_biases(labels):
     initial_bias = np.log(class_probs / (1 - class_probs))
     return initial_bias
 
-tokenizer_path="model/llama/Llama3.1-8B"
 
-llama_model_path = "model/llama/Llama3.1-8B"
+tokenizer_path = "model/llama/llama_models/Llama3.1-8B"
 
-config_path = "model/llama/Llama3.1-8B/config.json"
+llama_model_path = "model/llama/llama_models/Llama3.1-8B"
+
+config_path = "model/llama/llama_models/Llama3.1-8B/params.json"
 
 config = LlamaConfig.from_json_file(config_path)
+
 
 class LlamaEmbeddingLayer(nn.Module):
     def __init__(self, llama_model, **kwargs):
@@ -53,6 +59,7 @@ class LlamaEmbeddingLayer(nn.Module):
         outputs = self.llama_model(input_ids=input_ids, attention_mask=attention_mask)
         return outputs.last_hidden_state[:, 0, :]  # Extract [CLS] token embedding
 
+
 class MultiHeadAttentionLayer(nn.Module):
     def __init__(self, embed_dim, num_heads):
         super(MultiHeadAttentionLayer, self).__init__()
@@ -62,75 +69,6 @@ class MultiHeadAttentionLayer(nn.Module):
     def forward(self, x):
         attn_output, _ = self.attention(x, x, x)
         return self.layer_norm(attn_output + x)
-
-def assign(left, right):
-    if left.shape != right.shape:
-        raise ValueError(f"Shape mismatch. Left: {left.shape}, Right: {right.shape}")
-
-    if isinstance(right, torch.Tensor):
-        return torch.nn.Parameter(right.clone().detach())
-    else:
-        return torch.nn.Parameter(torch.tensor(right))
-
-
-def load_weights_into_llama(model, param_config, params):
-    model.tok_emb.weight = assign(model.tok_emb.weight, params["tok_embeddings.weight"])
-
-    for l in range(param_config["n_layers"]):
-
-        # Load attention weights
-        model.trf_blocks[l].att.W_query.weight = assign(
-            model.trf_blocks[l].att.W_query.weight,
-            params[f"layers.{l}.attention.wq.weight"]
-        )
-        model.trf_blocks[l].att.W_key.weight = assign(
-            model.trf_blocks[l].att.W_key.weight,
-            params[f"layers.{l}.attention.wk.weight"]
-        )
-        model.trf_blocks[l].att.W_value.weight = assign(
-            model.trf_blocks[l].att.W_value.weight,
-            params[f"layers.{l}.attention.wv.weight"]
-        )
-        model.trf_blocks[l].att.out_proj.weight = assign(
-            model.trf_blocks[l].att.out_proj.weight,
-            params[f"layers.{l}.attention.wo.weight"]
-        )
-        model.trf_blocks[l].norm1.weight = assign(
-            model.trf_blocks[l].norm1.weight,
-            params[f"layers.{l}.attention_norm.weight"]
-        )
-
-        # Load FeedForward weights
-        model.trf_blocks[l].ff.fc1.weight = assign(
-            model.trf_blocks[l].ff.fc1.weight,
-            params[f"layers.{l}.feed_forward.w1.weight"]
-        )
-        # For some reason w2 and w3 are provided in the wrong order in the weights file
-        model.trf_blocks[l].ff.fc2.weight = assign(
-            model.trf_blocks[l].ff.fc2.weight,
-            params[f"layers.{l}.feed_forward.w3.weight"]
-        )
-        model.trf_blocks[l].ff.fc3.weight = assign(
-            model.trf_blocks[l].ff.fc3.weight,
-            params[f"layers.{l}.feed_forward.w2.weight"]
-        )
-        model.trf_blocks[l].norm2.weight = assign(
-            model.trf_blocks[l].norm2.weight,
-            params[f"layers.{l}.ffn_norm.weight"]
-        )
-
-    # Load output layer weights
-    model.final_norm.weight = assign(model.final_norm.weight, params["norm.weight"])
-    model.out_head.weight = assign(model.out_head.weight, params["output.weight"])
-
-PPP = {
-    "dim": 4096,
-    "ffn_dim_multiplier": 1.3,
-    "multiple_of": 1024,
-    "n_heads": 32,
-    "n_kv_heads": 8,
-    "n_layers": 32,
-    "norm_eps": 1e-05, "rope_theta": 500000.0, "use_scaled_rope": True, "vocab_size": 128256}
 
 class LlamaClassifier(nn.Module):
 
@@ -145,11 +83,12 @@ class LlamaClassifier(nn.Module):
 
         self.train_labels = torch.tensor(self.train_labels, dtype=torch.float32).unsqueeze(1)
         self.val_labels = torch.tensor(self.val_labels, dtype=torch.float32).unsqueeze(1)
+        self.train_labels = self.train_labels.squeeze(1)
+        self.val_labels = self.val_labels.squeeze(1)
 
-
-        self.tokenizer = LlamaTokenizer.from_pretrained(tokenizer_path)
-        # self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
-
+        # self.tokenizer = LlamaTokenizer.from_pretrained(tokenizer_path, legacy=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+        self.tokenizer.pad_token = self.tokenizer.eos_token
         # Load LLaMA model for embeddings
         self.model = LlamaModel(config=config)
         # self.model = AutoModelForCausalLM.from_pretrained(
@@ -158,23 +97,23 @@ class LlamaClassifier(nn.Module):
         # self.model.load_state_dict(torch.load(llama_model_path, weights_only=True))
 
         # weights = torch.load(llama_model_path, mmap=True, map_location="cuda")
-        # load_weights_into_llama(self.model, PPP, weights)
         # self.model.load_state_dict(checkpoint)
         self.embedding_layer = LlamaEmbeddingLayer(self.model)
 
         # Define projection layers for string and integer features
         self.feature_projections = nn.ModuleDict()
         for feature, feature_type in PARAMS.FULL_FEATURES.items():
+            feature_key = feature.replace(" ", "_")
             if feature_type == 'str' and feature != "Patient_ID":
-                self.feature_projections[feature] = nn.Linear(config.hidden_size, 128)
+                self.feature_projections[feature_key] = nn.Linear(config.hidden_size, 128)
             elif feature_type == 'int32':
-                self.feature_projections[feature] = nn.Linear(1, 128)
+                self.feature_projections[feature_key] = nn.Linear(1, 128)
 
         # Attention layer
         self.attention_layer = MultiHeadAttentionLayer(embed_dim=128, num_heads=4)
 
         # Fully connected layers for classification
-        self.fc1 = nn.Linear(128 * len(PARAMS.FEATURES), 128)
+        self.fc1 = nn.Linear(1280, 128)
         self.fc2 = nn.Linear(128, 64)
         self.fc3 = nn.Linear(64, 32)
         self.output = nn.Linear(32, 2)
@@ -202,8 +141,8 @@ class LlamaClassifier(nn.Module):
             for feature in PARAMS.FEATURES if PARAMS.FULL_FEATURES[feature] == 'str'
         }
 
-        self.train_inputs = []
-        self.val_inputs = []
+        train_inputs = []
+        val_inputs = []
 
         # string features
         for feature in PARAMS.FEATURES:
@@ -214,39 +153,55 @@ class LlamaClassifier(nn.Module):
 
             if PARAMS.FULL_FEATURES[feature] == 'str':
                 # Add input IDs and attention masks for train and val to their respective lists
-                self.train_inputs.append(train_encodings[feature][0])  # input IDs for train
-                self.train_inputs.append(train_encodings[feature][1])  # attention mask for train
-                self.val_inputs.append(val_encodings[feature][0])  # input IDs for val
-                self.val_inputs.append(val_encodings[feature][1])  # attention mask for val
+                train_inputs.append(train_encodings[feature]["input_ids"])  # input IDs for train
+                train_inputs.append(train_encodings[feature]["attention_mask"])  # attention mask for train
+                val_inputs.append(val_encodings[feature]["input_ids"])  # input IDs for val
+                val_inputs.append(val_encodings[feature]["attention_mask"])  #
 
             elif PARAMS.FULL_FEATURES[feature] == 'int32':
                 # Add integer features to train and val lists
-                self.train_inputs.append(torch.tensor(self.train_df[feature], dtype=torch.float32).unsqueeze(1))
-                self.val_inputs.append(torch.tensor(self.val_df[feature], dtype=torch.float32).unsqueeze(1))
+                train_inputs.append(torch.tensor(self.train_df[feature].values, dtype=torch.float32).unsqueeze(1))
+                val_inputs.append(torch.tensor(self.val_df[feature].values, dtype=torch.float32).unsqueeze(1))
+
+        self.train_dataset = TensorDataset(*train_inputs, torch.tensor(self.train_labels, dtype=torch.float32))
+        self.val_dataset = TensorDataset(*val_inputs, torch.tensor(self.val_labels, dtype=torch.float32))
 
         self.data_loaded = True
 
-    def forward(self, inputs):
+    def forward(self, **inputs):
         feature_embeddings = []
 
         for feature_name, feature_data in inputs.items():
+            if feature_name.endswith("_attention_mask"):
+                continue
             if feature_name.endswith("_input_ids"):
-                input_ids = feature_data["input_ids"]
-                attention_mask = feature_data["attention_mask"]
-                embedding = self.embedding_layer(input_ids, attention_mask)
-                projection = self.feature_projections[feature_name[:-10]](embedding)  # Project string feature
+                input_ids = feature_data
+                attention_mask = inputs.get(f"{feature_name.replace('_input_ids', '_attention_mask')}", None)
+
+                embedding = self.embedding_layer(input_ids=input_ids, attention_mask=attention_mask)
+                projection_key = feature_name.replace('_input_ids', '')
+
+                if projection_key not in self.feature_projections:
+                    raise KeyError(f"Projection for {projection_key} not found in feature_projections")
+
+                projection = self.feature_projections[projection_key](embedding)
+
             else:
                 embedding = feature_data.float().unsqueeze(-1)
-                projection = self.feature_projections[feature_name](embedding)  # Project integer feature
+                projection = self.feature_projections[feature_name](embedding)
 
+            if projection.dim() == 2:  # Shape is [batch_size, 128]
+                projection = projection.unsqueeze(1)
             feature_embeddings.append(projection)
 
-        concatenated_features = torch.stack(feature_embeddings, dim=1)
+            # Stack the embeddings along a new dimension for multi-head attention
+        concatenated_features = torch.cat(feature_embeddings,
+                                          dim=1)  # Shape: [batch_size, sequence_length, embedding_dim]
 
         # Apply multihead attention and layer normalization
         attention_output = self.attention_layer(concatenated_features)
 
-        # Flatten and pass through dense layers
+        # Flatten the output and pass it through dense layers
         x = attention_output.view(attention_output.size(0), -1)
         x = torch.relu(self.fc1(x))
         x = torch.relu(self.fc2(x))
@@ -264,7 +219,7 @@ class LlamaClassifier(nn.Module):
         scheduler = CosineAnnealingWarmRestarts(optimizer, T_0=total_steps, T_mult=1, eta_min=0)
 
         # Loss function and evaluation metrics
-        loss_fn = nn.CrossEntropyLoss()
+        loss_fn = nn.BCEWithLogitsLoss()
         accuracy_metric = torchmetrics.Accuracy(task="multiclass", num_classes=2).to(device)
         precision_metric_class0 = torchmetrics.Precision(task="multiclass", num_classes=2, average="none")[0]
         precision_metric_class1 = torchmetrics.Precision(task="multiclass", num_classes=2, average="none")[1]
@@ -273,19 +228,44 @@ class LlamaClassifier(nn.Module):
 
         # Load datasets
         self.make_dataset()
-        train_loader = torch.utils.data.DataLoader(self.train_dataset, batch_size=PARAMS.BATCH_SIZE, shuffle=True)
-        val_loader = torch.utils.data.DataLoader(self.val_dataset, batch_size=PARAMS.BATCH_SIZE, shuffle=False)
+        train_loader = DataLoader(self.train_dataset, batch_size=PARAMS.BATCH_SIZE, shuffle=True)
+        val_loader = DataLoader(self.val_dataset, batch_size=PARAMS.BATCH_SIZE, shuffle=False)
 
         for epoch in range(PARAMS.EPOCHS):
             # Training loop
             self.model.train()
             train_loss = 0
             for batch in tqdm(train_loader, desc=f"Epoch {epoch + 1}/{PARAMS.EPOCHS}"):
-                input_data, labels = batch
-                input_data, labels = input_data.to(device), labels.to(device)
+                *input_data, labels = batch
+                input_data = [feature.to(device) for feature in input_data]  # Move each input to device
+                labels = labels.to(device)
+
+                # Initialize dictionary for model inputs
+                model_inputs = {}
+
+                # Populate model_inputs with text and integer features
+                idx = 0
+                for feature in PARAMS.FEATURES:
+                    if feature == "Patient_ID":
+                        continue
+
+                    feature_key = feature.replace(" ", "_")
+
+                    if PARAMS.FULL_FEATURES[feature] == 'str':
+                        # Assign input IDs and attention masks for text features
+                        model_inputs[f"{feature_key}_input_ids"] = input_data[idx].to(device)
+                        model_inputs[f"{feature_key}_attention_mask"] = input_data[idx + 1].to(device)
+                        idx += 2
+                    elif PARAMS.FULL_FEATURES[feature] == 'int32':
+                        # Assign integer feature tensors directly
+                        model_inputs[feature_key] = input_data[idx].to(device)
+                        idx += 1
 
                 optimizer.zero_grad()
-                outputs = self.model(input_data)
+
+                # Pass the dictionary directly to the model
+                outputs = self.forward(**model_inputs)
+
                 loss = loss_fn(outputs, labels)
                 loss.backward()
                 optimizer.step()
@@ -325,10 +305,32 @@ class LlamaClassifier(nn.Module):
             with torch.no_grad():
                 val_loss = 0
                 for batch in val_loader:
-                    input_data, labels = batch
-                    input_data, labels = input_data.to(device), labels.to(device)
+                    *input_data, labels = batch
+                    input_data = [feature.to(device) for feature in input_data]  # Move each input to device
+                    labels = labels.to(device)
 
-                    outputs = self.model(input_data)
+                    # Initialize dictionary for model inputs
+                    model_inputs = {}
+
+                    # Populate model_inputs with text and integer features
+                    idx = 0
+                    for feature in PARAMS.FEATURES:
+                        if feature == "Patient_ID":
+                            continue
+
+                        feature_key = feature.replace(" ", "_")
+
+                        if PARAMS.FULL_FEATURES[feature] == 'str':
+                            # Assign input IDs and attention masks for text features
+                            model_inputs[f"{feature_key}_input_ids"] = input_data[idx].to(device)
+                            model_inputs[f"{feature_key}_attention_mask"] = input_data[idx + 1].to(device)
+                            idx += 2
+                        elif PARAMS.FULL_FEATURES[feature] == 'int32':
+                            # Assign integer feature tensors directly
+                            model_inputs[feature_key] = input_data[idx].to(device)
+                            idx += 1
+
+                    outputs = self.forward(**model_inputs)
                     loss = loss_fn(outputs, labels)
                     val_loss += loss.item()
 

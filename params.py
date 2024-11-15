@@ -52,7 +52,7 @@ FEATURES = [
 
 # training parameters
 LEARNING_RATE = 5e-5
-EPOCHS = 1000
+EPOCHS = 2
 BATCH_SIZE = 4
 EPOCHS_PER_CYCLE = 4
 
