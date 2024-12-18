@@ -5,11 +5,11 @@ CLASSES = ["NC", "PRD"]
 NUM_CLASSES = len(CLASSES)
 
 FULL_FEATURES = {
-    "Patient_ID": 'int32',
+    "Patient_ID": 'int16',
     "Label": 'str',
     "Gender": 'str',
-    "Age": "int32",
-    "Education": "int32",
+    "Age": "int16",
+    "Education": "int16",
     "Literacy and Numeracy": "str",
     "Medical History": "str",
     "Medications": "str",
@@ -44,20 +44,20 @@ FEATURES = [
     "Language",
     "Orientation",
     "Judgment and Problem Solving",
-    "Social Activities",
-    "Home and Hobbies",
-    "Daily Living",
+    # "Social Activities",
+    # "Home and Hobbies",
+    # "Daily Living",
     "Personality and Behavior",
 ]
 
 # training parameters
-LEARNING_RATE = 5e-5
-EPOCHS = 2
-BATCH_SIZE = 4
+LEARNING_RATE = 1e-4
+EPOCHS = 10000
+BATCH_SIZE = 1
 EPOCHS_PER_CYCLE = 4
 
 # bert
-MAX_LEN = 128
+MAX_LEN = 64
 
 # llama
 LLAMA_MODEL_PATH = "./Llama3.1-8B-Instruct"
