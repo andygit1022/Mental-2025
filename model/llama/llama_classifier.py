@@ -1,3 +1,4 @@
+########### model/llama/llama_classifier.py ##############
 # from ..base_model import BaseModel
 import params as PARAMS
 import numpy as np
@@ -20,8 +21,6 @@ import os
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
-
-
 
 
 # # Check if CUDA is available
@@ -48,8 +47,10 @@ def compute_class_biases(labels):
     return initial_bias
 
 
-tokenizer_path = "model/llama/Llama-3.1-8B-hf"
-llama_model_path = "model/llama/Llama-3.1-8B-hf"
+tokenizer_path = "meta-llama/Llama-3.1-8B"
+llama_model_path = "meta-llama/Llama-3.1-8B"
+#tokenizer_path = "model/llama/Llama-3.1-8B-hf"
+#llama_model_path = "model/llama/Llama-3.1-8B-hf"
 
 class LlamaEmbeddingLayer(nn.Module):
     def __init__(self, llama_model, device, **kwargs):
@@ -57,13 +58,40 @@ class LlamaEmbeddingLayer(nn.Module):
         self.llama_model = llama_model
         self.device = device
 
+    # def forward(self, input_ids, attention_mask=None):
+    #     input_ids = input_ids.to(dtype=torch.long, device=self.device)
+    #     attention_mask = attention_mask.to(self.device) if attention_mask is not None else None
+
+    #     outputs = self.llama_model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+    #     # Use the last hidden state from the `hidden_states` tuple
+    #     return outputs.hidden_states[-1][:, 0, :]  # Extract the [CLS] token embedding
+    
+    # avg pooling
     def forward(self, input_ids, attention_mask=None):
         input_ids = input_ids.to(dtype=torch.long, device=self.device)
         attention_mask = attention_mask.to(self.device) if attention_mask is not None else None
 
         outputs = self.llama_model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
-        # Use the last hidden state from the `hidden_states` tuple
-        return outputs.hidden_states[-1][:, 0, :]  # Extract the [CLS] token embedding
+        hidden_states = outputs.hidden_states[-1]  # Shape: [batch_size, seq_len, hidden_dim]
+
+        # Mean Pooling over all tokens
+        embedding = hidden_states.mean(dim=1)  # Shape: [batch_size, hidden_dim]
+
+        return embedding
+
+    # def forward(self, input_ids, attention_mask=None):
+    #     input_ids = input_ids.to(dtype=torch.long, device=self.device)
+    #     attention_mask = attention_mask.to(self.device) if attention_mask is not None else None
+
+    #     outputs = self.llama_model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
+    #     hidden_states = outputs.hidden_states[-1]  # Shape: [batch_size, seq_len, hidden_dim]
+
+    #     # Attention-based weighted pooling
+    #     attn_scores = torch.softmax(hidden_states.mean(dim=-1), dim=1)  # Shape: [batch_size, seq_len]
+    #     embedding = torch.sum(hidden_states * attn_scores.unsqueeze(-1), dim=1)  # Weighted sum
+
+    #     return embedding
+
 
 
 class MultiHeadAttentionLayer(nn.Module):
@@ -80,7 +108,7 @@ class MultiHeadAttentionLayer(nn.Module):
 class LlamaClassifier(nn.Module):
 
     def get_model(self):
-        return self.model
+        return self.model    
     def __init__(self, df, device, world_size, rank, *args, **kwargs):
         super().__init__(*args, **kwargs)
         (self.train_df, self.val_df) = df
@@ -159,9 +187,10 @@ class LlamaClassifier(nn.Module):
 
         # Fully connected layers for classification
         self.fc1 = nn.Linear(PARAMS.MAX_LEN*(len(PARAMS.FEATURES)-1), PARAMS.MAX_LEN).to(device)
+        self.output = nn.Linear(PARAMS.MAX_LEN, 2).to(device)
         # self.fc2 = nn.Linear(128, 64).to(device)
-        self.fc3 = nn.Linear(64, 32).to(device)
-        self.output = nn.Linear(32, 2).to(device)
+        #self.fc3 = nn.Linear(64, 32).to(device)
+        #self.output = nn.Linear(32, 2).to(device)
 
     def tokenize_feature(self, texts, max_length=PARAMS.MAX_LEN):
         encoding = self.tokenizer(
@@ -170,7 +199,7 @@ class LlamaClassifier(nn.Module):
             padding="max_length",  # Ensures fixed length of max_length
             truncation=True,
             return_tensors="pt"
-        )
+        )        
         # encoding["input_ids"] = torch.clamp(encoding["input_ids"], min=0, max=self.tokenizer.vocab_size - 1)
 
         # Return tensors directly
@@ -254,7 +283,12 @@ class LlamaClassifier(nn.Module):
                 # embedding = self.embedding_layer(input_ids=input_ids, attention_mask=attention_mask)
                 # embedding = self.model.model.embed_tokens(input_ids=input_ids, attention_mask=attention_mask)
                 outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
-                embedding = outputs.hidden_states[-1][:, 0, :]
+
+                hidden_states = outputs.hidden_states[-1]        # Shape: [batch_size, seq_len, hidden_dim]
+                embedding = hidden_states.mean(dim=1)            # Shape: [batch_size, hidden_dim]
+
+                #embedding = outputs.hidden_states[-1][:, 0, :]  # 첫 토큰만 임베딩시 대표성 상실-> mean pooling으로 진행.
+
                 projection_key = feature_name.replace('_input_ids', '')
 
                 if projection_key not in self.feature_projections:
@@ -294,7 +328,7 @@ class LlamaClassifier(nn.Module):
         x = attention_output.view(attention_output.size(0), -1)
         x = torch.relu(self.fc1(x))
         # x = torch.relu(self.fc2(x))
-        x = torch.relu(self.fc3(x))
+        #x = torch.relu(self.fc3(x))
 
         return self.output(x)
 
