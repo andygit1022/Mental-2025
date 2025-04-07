@@ -1,22 +1,287 @@
+# util.py
 import pandas as pd
 import params as PARAMS
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+import ast
+import re
+from sklearn.feature_extraction.text import TfidfVectorizer
+import nltk
+# from nltk.corpus import opinion_lexicon  # (삭제)
+from sklearn.preprocessing import MinMaxScaler
+import csv
+from transformers import BertTokenizer
+
+# 영어 감정 사전 제거 -> POS_LEX, NEG_LEX도 제거
+
+def normalize_added_features(df: pd.DataFrame):
+    """
+    df 안에서 *_polarity, *_mrc_conc, *_mrc_fam, *_local_idf, *_tf_score
+    열들만 골라서 MinMax 정규화(0~1).
+    ※ polarity를 완전히 사용 안 한다면 "_polarity"도 굳이 안 찾아도 됩니다.
+    """
+    scaler = MinMaxScaler()
+
+    # 정규화 대상 컬럼만 찾기
+    # "_polarity" 제거해도 됨. 혹은 그대로 두어도 0값이면 영향 없음.
+    target_suffixes = [
+        # "_polarity",  # (사용 안 할 거면 주석 처리 or 제거)
+        #"_mrc_conc", "_mrc_fam", "_local_idf", "_tf_score"
+    ]
+    columns_to_scale = [
+        col for col in df.columns
+        if any(col.endswith(suf) for suf in target_suffixes)
+    ]
+
+    if not columns_to_scale:
+        print("[INFO] No columns found for normalization.")
+        return df
+
+    # 실제로 fit_transform 적용
+    df[columns_to_scale] = scaler.fit_transform(df[columns_to_scale])
+    return df
+
+
+def load_mrc_data(mrc_file="mrc_database.csv"):
+    """
+    mrc_data.csv 예시:
+    word,concreteness,familiarity
+    apple,620,500
+    home,530,700
+    ...
+    """
+    mrc_dict = {}
+    with open(mrc_file, "r") as f:  # , encoding="utf-8" 필요시
+        reader = csv.DictReader(f)
+        for row in reader:
+            w = row["Word"].lower().strip()
+            conc = float(row["Concreteness"])
+            fam = float(row["Familiarity"])
+            mrc_dict[w] = {"conc": conc, "fam": fam}
+    return mrc_dict
+
+
+MRC_DICT = load_mrc_data()
+
+
+def analyze_sentence(sentence, idf_scores, mrc_dict):
+
+    words = sentence.lower().split()
+    word_count = len(words)
+
+    # (영어 polarity 제거) -> 항상 0
+    polarity = 0.0
+
+    # MRC (concreteness, familiarity)
+    conc_sum = 0.0
+    fam_sum = 0.0
+    mrc_hits = 0
+    for w in words:
+        if w in mrc_dict:
+            conc_sum += mrc_dict[w]["conc"]
+            fam_sum += mrc_dict[w]["fam"]
+            mrc_hits += 1
+    avg_conc = conc_sum / mrc_hits if mrc_hits else 0.0
+    avg_fam = fam_sum / mrc_hits if mrc_hits else 0.0
+
+    # IDF
+    if word_count > 0:
+        idf_sum = sum(idf_scores.get(w, 1.0) for w in words)
+        avg_idf_local = idf_sum / word_count
+    else:
+        avg_idf_local = 0.0
+
+    # TF
+    tf_score = float(word_count)
+
+    return {
+        "polarity": polarity,    # 항상 0
+        "avg_conc": avg_conc,
+        "avg_fam": avg_fam,
+        "local_idf": avg_idf_local,
+        "tf_score": tf_score
+    }
 
 
 def read_data():
-    df = pd.read_csv(PARAMS.DATASET_PATH, encoding_errors="ignore")
-    columns = ["Label"] + PARAMS.FEATURES
-    df = df.astype(PARAMS.FULL_FEATURES)
-    df = df[columns]
-    max_lengths = df.applymap(lambda x: len(str(x))).max()
+    def compute_idf(df):
+        """
+        scikit-learn TfidfVectorizer로 IDF 계산
+        """
+        def preprocess_text(text):
+            """Remove numbers and keep only words in a sentence."""
+            return ' '.join([word for word in text.split() if not any(char.isdigit() for char in word)])
 
-    label_encoder = LabelEncoder()
-    df['label_encoded'] = label_encoder.fit_transform(df['Label'])
+        corpus = []
+        for index, row in df.iterrows():
+            for category in PARAMS.FEATURES:
+                if category == "Patient_ID" or PARAMS.FULL_FEATURES[category] == 'int32':
+                    continue
+                sentences = row[category]
+                if isinstance(sentences, list) and sentences:
+                    cleaned_sentences = [preprocess_text(sentence) for sentence in sentences]
+                    corpus.extend(cleaned_sentences)
 
-    # train_df, val_df = train_test_split(df, test_size=0.2, random_state=42)
+        vectorizer = TfidfVectorizer(use_idf=True)
+        vectorizer.fit(corpus)  # Learn IDF values
+        idf_scores = dict(zip(vectorizer.get_feature_names_out(), vectorizer.idf_))
+        return idf_scores
 
-    train_df, val_df = train_test_split(df, test_size=0.2, stratify=df['label_encoded'])
+    def compute_max_sentences(df):
+        max_sentences_per_category = {
+            category: df[category].apply(lambda x: len(x) if isinstance(x, list) else 0).mean()
+            for category in PARAMS.FEATURES
+            if category != "Patient_ID" and PARAMS.FULL_FEATURES[category] != 'int32'
+        }
+        return max_sentences_per_category
 
+    def compute_max_token_length(df):
+        # DistilBert -> monologg/kobert
+        tokenizer = BertTokenizer.from_pretrained('monologg/kobert')
+        max_token_length_per_category = {
+            category: df[category].apply(
+                lambda x: max((len(tokenizer.tokenize(sentence)) for sentence in x), default=0)
+                if isinstance(x, list) else 0
+            ).max()
+            for category in PARAMS.FEATURES
+            if category != "Patient_ID" and PARAMS.FULL_FEATURES[category] != 'int32'
+        }
+        return max_token_length_per_category
+
+    def extract_statistics(df, idf_scores):
+        """
+        polarity -> 0 으로 처리
+        """
+        result = []
+        for index, row in df.iterrows():
+            row_stats = {}
+            for category in PARAMS.FEATURES:
+                if category == "Patient_ID" or PARAMS.FULL_FEATURES[category] == 'int32':
+                    continue
+
+                sentences = row[category]
+                if isinstance(sentences, list) and sentences:
+                    total_sentences = len(sentences)
+                    total_words = sum(len(sentence.split()) for sentence in sentences)
+                    total_chars = sum(len(sentence) for sentence in sentences)
+                    total_numbers = sum(len(re.findall(r'\d+', sentence)) for sentence in sentences)
+                    avg_words = total_words / total_sentences
+                    avg_chars = total_chars / total_sentences
+
+                    # IDF-weighted sum
+                    if total_words > 0:
+                        idf_weighted_sum = sum(
+                            sum(idf_scores.get(word, 1) for word in sentence.split())
+                            for sentence in sentences
+                        )
+                        avg_idf_weight = idf_weighted_sum / total_words
+                    else:
+                        avg_idf_weight = 0
+
+                    # 폴라리티/TF 계산
+                    polarity_sum = 0.0
+                    conc_sum = 0.0
+                    fam_sum = 0.0
+                    idf_loc_sum = 0.0
+                    tf_sum = 0.0
+
+                    for sent in sentences:
+                        feats = analyze_sentence(sent, idf_scores, MRC_DICT)
+                        polarity_sum += feats["polarity"]       # 0
+                        conc_sum += feats["avg_conc"]
+                        fam_sum += feats["avg_fam"]
+                        idf_loc_sum += feats["local_idf"]
+                        tf_sum += feats["tf_score"]
+
+                    avg_polarity = polarity_sum / total_sentences  # 결과적으로 0
+                    avg_conc = conc_sum / total_sentences
+                    avg_fam = fam_sum / total_sentences
+                    avg_idf_local = idf_loc_sum / total_sentences
+                    avg_tf = tf_sum / total_sentences
+
+                else:
+                    # 문장이 없을 경우
+                    total_sentences = 0
+                    avg_words = 0
+                    avg_chars = 0
+                    total_numbers = 0
+                    avg_idf_weight = 0
+                    avg_polarity = 0
+                    avg_conc = 0
+                    avg_fam = 0
+                    avg_idf_local = 0
+                    avg_tf = 0
+
+                # hallow feature
+                row_stats[f'{category}_avg_words'] = avg_words
+                row_stats[f'{category}_total_sentences'] = total_sentences
+                row_stats[f'{category}_avg_chars'] = avg_chars
+                row_stats[f'{category}_total_numbers'] = total_numbers
+                row_stats[f'{category}_avg_idf_weight'] = avg_idf_weight
+
+                # 만약 컬럼을 완전히 없애고 싶으면 아래 5줄도 삭제 가능
+                # lexicon feature
+                # row_stats[f'{category}_polarity'] = avg_polarity
+                # row_stats[f'{category}_mrc_conc'] = avg_conc
+                # row_stats[f'{category}_mrc_fam'] = avg_fam
+                # row_stats[f'{category}_local_idf'] = avg_idf_local
+                # row_stats[f'{category}_tf_score'] = avg_tf
+
+            result.append(row_stats)
+
+        return pd.DataFrame(result)
+
+    # df = pd.read_csv(PARAMS.DATASET_PATH, encoding_errors="ignore")
+    df_ad = pd.read_csv("./data/dataset/AD_250120_korea.csv", encoding_errors="ignore")
+    df_mci = pd.read_csv("./data/dataset/MCI_250120_korea.csv", encoding_errors="ignore")
+    df_nc = pd.read_csv("./data/dataset/NC_250120_korea.csv", encoding_errors="ignore")
+    df_mix = pd.read_csv("./data/dataset/AI_250120_korea.csv", encoding_errors="ignore")
+    df_nc2 = df_mix[df_mix['Label'] == 'NC']
+    df_nc = pd.concat([df_nc, df_nc2], ignore_index=True)
+    df_mci2 = df_mix[df_mix['Label'] == 'MCI']
+    df_mci = pd.concat([df_mci, df_mci2], ignore_index=True)
+    df_ad2 = df_mix[df_mix['Label'] == 'Dementia']
+    df_ad = pd.concat([df_ad, df_ad2], ignore_index=True)
+    df_nc['Label'] = "NC"
+    df_mci['Label'] = "MCI"
+    df_ad['Label'] = "AD"
+    df = pd.concat([df_nc, df_mci, df_ad], ignore_index=True)
+
+    df = df[["Label", "Original_ID"] + PARAMS.FEATURES]
+    for col in PARAMS.FEATURES:
+        if col in ["Patient_ID", "Gender", "Age", "Edu"]:
+            continue
+        df[col] = df[col].apply(lambda x: ast.literal_eval(x) if pd.notnull(x) else x)
+    df = df.applymap(lambda x: [] if isinstance(x, float) and pd.isna(x) else x)
+    df = df[
+        ~((df['Age'].apply(lambda x: isinstance(x, list) and len(x) == 0)) |
+          (df['Edu'].apply(lambda x: isinstance(x, list) and len(x) == 0)))
+    ]
+    df = df.astype({'Original_ID': 'str', 'Patient_ID': 'Int32', 'Gender': 'Int32', 'Age': 'Int32', 'Edu': 'Int32'})
+    df = df[df['Edu'] <= 50]
+    df = df[df['Age'] >= 30]
+    df = df.dropna(subset=PARAMS.FEATURES)
+    df = df.reset_index(drop=True)
+
+    # IDF
+    idf_scores = compute_idf(df)
+
+    # 통계치 추출
+    stats_df = extract_statistics(df, idf_scores)
+    # label_encoder = LabelEncoder()
+    # df['Gender'] = label_encoder.fit_transform(df['Gender'])
+
+    # df['Age'] = df['Age'].astype("int").astype("str")
+    # columns = ["Label"] + PARAMS.FEATURES
+    # df = df.astype(PARAMS.FULL_FEATURES)
+    # df = df[columns]
+    # max_lengths = df.applymap(lambda x: len(str(x))).max()
+    df = pd.concat([df, stats_df], axis=1)
+    # df = normalize_added_features(df)
+
+    df['label_encoded'] = df['Label'].map({cls: i for i, cls in enumerate(PARAMS.CLASSES)})
+
+    train_df, val_df = train_test_split(df, test_size=0.2,
+                                        stratify=df['label_encoded'],
+                                        random_state=42)
     return train_df, val_df
-

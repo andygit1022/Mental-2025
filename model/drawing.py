@@ -1,6 +1,7 @@
+# model/drawing.py
 import matplotlib
-
-matplotlib.use('TkAgg')
+import os
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import itertools
@@ -19,11 +20,15 @@ def plot_attention_scores(attention_scores, feature_labels=None):
     plt.title("Attention Score Heatmap")
     plt.xlabel("Query Positions")
     plt.ylabel("Key Positions")
-    plt.show(block=False)
+    
+    plt.savefig("results/attention_score.png")
+    #plt.show(block=False)
 
 
 class DrawPlot:
     def __init__(self, fn):
+        os.makedirs("results", exist_ok=True)
+        os.makedirs("results/epochs", exist_ok=True)
         self.x = []
         self.losses = []
         self.val_losses = []
@@ -189,6 +194,7 @@ class DrawPlot:
             plt.legend(loc='upper left')
             self.legend = True
         plt.pause(0.01)
+        plt.savefig(f"results/epochs/drawplot_epoch_{self.epoch}.png")
 
 
 def plot_confusion_matrix(cm, classes,
@@ -227,4 +233,7 @@ def plot_confusion_matrix(cm, classes,
     plt.tight_layout()
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
-    plt.show(block=True)
+    
+    plt.savefig(f"results/confusion_matrix.png")
+    #plt.show(block=False)
+    

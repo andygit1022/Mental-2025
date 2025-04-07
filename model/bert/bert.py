@@ -1,17 +1,27 @@
 from ..base_model import BaseModel
 import tensorflow as tf
-from tensorflow.keras.models import load_model
-from keras.layers import Input, Dense, Concatenate, Layer, MultiHeadAttention, LayerNormalization, Flatten
-from transformers import DistilBertTokenizer, TFDistilBertModel
+from tensorflow.python.keras.models import load_model
+from tensorflow.python.keras.layers import Input, Dense, Concatenate, Layer, Flatten, Dropout
+from keras.layers import MultiHeadAttention, LayerNormalization
+# Distil Bert 사용시
+#from transformers import DistilBertTokenizer, TFDistilBertModel
+# Bert Large 사용시
+from transformers import BertTokenizer, TFBertModel
+
 import params as PARAMS
-from tensorflow.keras.models import Model
+from tensorflow.python.keras.models import Model
 import numpy as np
 from tensorflow.python.keras.utils.np_utils import to_categorical
-
+from tensorflow.python.keras.initializers.initializers_v2 import Constant
 from transformers import AutoTokenizer, TFAutoModel
+import os
 
-
+    
 def compute_class_biases(labels):
+    """
+    클래스 분포에 따른 초기 bias를 구해주는 함수.
+    각 클래스의 확률 p를 구한 뒤, log(p / (1 - p)) 형태로 bias를 설정해줍니다.
+    """
     # Assuming labels are one-hot encoded, calculate the class distribution
     class_totals = np.sum(labels, axis=0)
     class_probs = class_totals / np.sum(class_totals)
@@ -19,39 +29,64 @@ def compute_class_biases(labels):
     # Calculate logit bias: log(p / (1 - p)) for each class
     initial_bias = np.log(class_probs / (1 - class_probs))
     return initial_bias
-
-class DistilBERTEmbeddingLayer(Layer):
-    def __init__(self, bert_model, **kwargs):
-        super(DistilBERTEmbeddingLayer, self).__init__(**kwargs)
-        self.bert_model = bert_model  # Reuse the passed DistilBERT model
-        # self.bert_model.trainable = False
-
+# (2) BERT Large 사용시 + pooler -> use_pooler_output=True
+class BERTEmbeddingLayer(Layer):
+    def __init__(self, bert_model,use_pooler_output=False ,**kwargs):
+        super(BERTEmbeddingLayer, self).__init__(**kwargs)
+        self.bert_model = bert_model  # Reuse the passed BERT model
+        # pooler layer 추가 -> 사용 X
+        self.use_pooler_output = use_pooler_output
+        # self.bert_model.trainable = False     # fine-tuning 없이 하는 부분.
+        # pooler 레이어의 가중치를 학습하지 않도록 설정
+        if hasattr(self.bert_model, 'pooler') and not self.use_pooler_output:
+            self.bert_model.pooler.trainable = False
+        
     def call(self, inputs):
         input_ids, attention_mask = inputs
         output = self.bert_model(input_ids=input_ids, attention_mask=attention_mask)
-        return output.last_hidden_state[:, 0, :]  # Extract [CLS] token embedding
+        # DistilBERT에는 pooler_output이 없음 → last_hidden_state[:, 0, :] 사용
+        # BERT-Large 등에는 pooler_output이 있으므로, use_pooler_output=True면 그걸 사용
+        if self.use_pooler_output and hasattr(output, 'pooler_output') and (output.pooler_output is not None):
+            return output.pooler_output
+        else:
+            # pooler를 사용하지 않거나 모델에 pooler가 없는 경우
+            return output.last_hidden_state[:, 0, :]
+        #return output.last_hidden_state[:, 0, :]  # Extract [CLS] token embedding
 
     def get_config(self):
         # This is required for model serialization
-        config = super(DistilBERTEmbeddingLayer, self).get_config()
+        config = super(BERTEmbeddingLayer, self).get_config()
+        print(config)
         # We cannot directly serialize bert_model, so we exclude it
         return config
 
     @classmethod
     def from_config(cls, config):
+        """
+        레이어 로드 시, 내부의 BERT 모델을 다시 생성해주는 메소드.
+        """
         # Recreate the BERT model when loading the layer
-        bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
+        # Distil Bert 사용시
+        #bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
+        # Bert Large 사용시
+        bert_model = TFBertModel.from_pretrained('bert-large-uncased')  # BERT Large로 교체
         # bert_model = TFAutoModel.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
         # bert_model.trainable = False
         return cls(bert_model=bert_model, **config)
 
 
 class Bert(BaseModel):
-
+    """
+    BaseModel을 상속하여, 데이터셋 생성부터 모델 구성(build), 
+    학습(train), 평가(test)까지 담당하는 클래스입니다.
+    """
     def __init__(self, df):
         super().__init__(df)
-        self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
-        # self.tokenizer = AutoTokenizer.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
+        # Distil Bert 사용시
+        #self.tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
+        # Bert Large 사용시
+        self.tokenizer = BertTokenizer.from_pretrained('bert-large-uncased')
+
 
     def tokenize_feature(self, texts, max_length=PARAMS.MAX_LEN):
         encoding = self.tokenizer(
@@ -115,9 +150,12 @@ class Bert(BaseModel):
         self.data_loaded = True
 
     def build(self):
-        bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
+        # Distil Bert 사용시
+        #bert_model = TFDistilBertModel.from_pretrained('distilbert-base-uncased')
+        # Bert Large 사용시
+        bert_model = TFBertModel.from_pretrained('bert-large-uncased')
         # bert_model = TFAutoModel.from_pretrained("microsoft/MiniLM-L12-H384-uncased")
-        shared_embedding_layer = DistilBERTEmbeddingLayer(bert_model=bert_model)
+        shared_embedding_layer = BERTEmbeddingLayer(bert_model=bert_model)
 
         feature_embeddings = []
         model_inputs = []
@@ -136,16 +174,23 @@ class Bert(BaseModel):
             elif PARAMS.FULL_FEATURES[feature] == 'int32':
                 feature_embedding = Input(shape=(1,), dtype=tf.float32, name=f"{feature_key}")
                 model_inputs.append(feature_embedding)
-
+          # dese layer 차웜 줄여보기 
             feature_proj = Dense(256)(feature_embedding)
+            #(3) drop-out 적ㅇ용
+            #feature_proj = Dropout(0.3)(feature_proj)  # Apply Dropout with rate=0.3
             feature_embeddings.append(feature_proj)
 
         concatenated_features = tf.stack(feature_embeddings, axis=1)
 
         # Attention layer to capture attention scores
-        attention_layer = MultiHeadAttention(num_heads=4, key_dim=256//4)
+        attention_layer = MultiHeadAttention(num_heads=PARAMS.NUM_HEAD, key_dim=256//PARAMS.NUM_HEAD)
+        #실제 값으로 수정 bert large = (16, 1024/16 = 64), distil bert = (12,768/12 = 64)
+        #attention_layer = MultiHeadAttention(num_heads=16, key_dim=1024//16)
         attention_output, attention_scores = attention_layer(concatenated_features, concatenated_features, return_attention_scores=True)
         attention_output = LayerNormalization()(attention_output + concatenated_features)
+
+        # Add Dropout after Attention layer
+        #attention_output = Dropout(0.3)(attention_output)  # Apply Dropout with rate=0.3
 
         # Add dense layers for classification
         fl_output = Flatten()(attention_output)
@@ -162,6 +207,6 @@ class Bert(BaseModel):
         self.model = Model(inputs=model_inputs, outputs=output)
 
     def test(self):
-        self.model = load_model('model.keras', custom_objects={'DistilBERTEmbeddingLayer': DistilBERTEmbeddingLayer})
+        self.model = load_model('model.keras', custom_objects={'BERTEmbeddingLayer': BERTEmbeddingLayer})
 
         super().test()
