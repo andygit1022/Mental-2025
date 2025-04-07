@@ -51,7 +51,7 @@ LLM으로부터 추출한 피처를 BERT에 입력하여 분류하는 비교 실
 
 ### 🎯 클래스 별 정밀도 및 재현율 (NC, MCI, AD)
 
-![Proposed Model 성능](./proposed model.png)
+![Proposed Model 성능](./proposed_model.png)
 
 ---
 
