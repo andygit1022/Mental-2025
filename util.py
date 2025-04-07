@@ -17,7 +17,7 @@ def read_data():
 
     # train_df, val_df = train_test_split(df, test_size=0.2, random_state=42)
 
-    train_df, val_df = train_test_split(df, test_size=0.2, stratify=df['label_encoded'])
+    train_df, val_df = train_test_split(df, test_size=0.2, stratify=df['label_encoded'], random_state=42)
 
     return train_df, val_df
 

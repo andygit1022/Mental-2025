@@ -76,7 +76,7 @@ class LlamaEmbeddingLayer(nn.Module):
         # (A) Attention-weighted Pooling에 쓰일 모듈 (1번) : BERT의 CLS와 유사
         # -----------------------------------------------------
         self.attn_score_proj = nn.Linear(hidden_dim, 1)
-        self.attn_score_proj = self.attn_score_proj
+        self.attn_score_proj = self.attn_score_proj.half()
         # self.attn_score_proj = nn.Linear(hidden_dim, 1, dtype=torch.float16)
         
         # -----------------------------------------------------
@@ -309,27 +309,23 @@ class LlamaClassifier(nn.Module):
     def get_model(self):
         return self.model    
     
-    def __init__(self, df, device, world_size, rank, hidden_dim=4096, pooling_mode="attention", *args, **kwargs):
+    def __init__(self, df, device, world_size, rank, *args, **kwargs):
         super().__init__(*args, **kwargs)
         (self.train_df, self.val_df) = df
 
         self.device = device
         self.world_size = world_size
         self.rank = rank
-        self.pooling_mode = pooling_mode
-        self.hidden_dim = hidden_dim
-        
-        
         #self.dropout = nn.Dropout(p=0.2)
 
         self.train_labels = torch.nn.functional.one_hot(
             torch.tensor(self.train_df['label_encoded'].values, dtype=torch.long),
-            num_classes=PARAMS.NUM_CLASSES  # Adjust as needed
+            num_classes=2  # Adjust as needed
         ).float()
 
         self.val_labels = torch.nn.functional.one_hot(
             torch.tensor(self.val_df['label_encoded'].values, dtype=torch.long),
-            num_classes=PARAMS.NUM_CLASSES  # Adjust as needed
+            num_classes=2  # Adjust as needed
         ).float()
 
         self.train_labels = torch.tensor(self.train_labels, dtype=torch.float16).unsqueeze(1)
@@ -353,7 +349,7 @@ class LlamaClassifier(nn.Module):
             r=4,
             lora_alpha=64,
             lora_dropout=0.1,
-            target_modules=["o_proj"],  # Apply LoRA to specific layers
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],  # Apply LoRA to specific layers
             # target_modules=["k_proj"],  # Apply LoRA to specific layers
         )
 
@@ -378,59 +374,6 @@ class LlamaClassifier(nn.Module):
         # weights = torch.load(llama_model_path, mmap=True, map_location="cuda")
         # self.model.load_state_dict(checkpoint)
         self.embedding_layer = LlamaEmbeddingLayer(llama_model=self.model, device=device,pooling_mode=PARAMS.POOLING_MODE)
-
-                # -----------------------------------------------------
-        # (A) Attention-weighted Pooling에 쓰일 모듈 (1번) : BERT의 CLS와 유사
-        # -----------------------------------------------------
-        self.attn_score_proj = nn.Linear(hidden_dim, 1)
-        self.attn_score_proj = self.attn_score_proj
-        # self.attn_score_proj = nn.Linear(hidden_dim, 1, dtype=torch.float16)
-        
-        # -----------------------------------------------------
-        # (B) Learnable Pooling (2번) - MLP로 score 계산
-        # -----------------------------------------------------
-        self.learnable_score_mlp = nn.Sequential(
-            nn.Linear(hidden_dim, 512),  # 중간 채널 임의(512)
-            nn.Tanh(),
-            nn.Linear(512, 1)
-        )
-
-        # -----------------------------------------------------
-        # (D) Downstream Projection Layer (4번)
-        #     (Mean Pooling) → (4096→1024→256)
-        # -----------------------------------------------------
-        self.proj = nn.Sequential(
-            nn.Linear(hidden_dim, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 256),
-            nn.ReLU()
-        )
-        
-        
-        
-        
-        
-
-        # -----------------------------------------------------
-        # (E) Pooling 이후 MLP (5번): (Max Pool) → (4096→1024→256→64→1)
-        # -----------------------------------------------------
-        self.pooling_mlp = nn.Sequential(
-            nn.Linear(4096, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 256),
-            nn.ReLU(),
-            nn.Linear(256, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1)  # 최종 1차원(예: 로짓)
-        )
-
-        # -----------------------------------------------------
-        # (F) Self-Attention으로 Pooling (6번) - Learnable Query
-        # -----------------------------------------------------
-        self.query = nn.Parameter(torch.randn(1, 1, hidden_dim))  # (1,1,4096)
-        self.W_q = nn.Linear(hidden_dim, hidden_dim)
-        self.W_k = nn.Linear(hidden_dim, hidden_dim)
-        self.W_v = nn.Linear(hidden_dim, hidden_dim)
 
         # Define projection layers for string and integer features
         self.feature_projections = nn.ModuleDict()
@@ -540,191 +483,16 @@ class LlamaClassifier(nn.Module):
                 if attention_mask is not None:
                     attention_mask = attention_mask.to(self.device)
                     
-                   
+                # (2) self.embedding_layer(...)로 pooling
+                embedding = self.embedding_layer(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask
+                )    
 
                 # embedding = self.embedding_layer(input_ids=input_ids, attention_mask=attention_mask)
                 # embedding = self.model.model.embed_tokens(input_ids=input_ids, attention_mask=attention_mask)
-                outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
-                hidden_states = outputs.hidden_states[-1]        # Shape: [batch_size, seq_len, hidden_dim]
-                
-                
-                if self.pooling_mode == "cls":
-                # LLaMA는 공식적으로 [CLS] 토큰이 없지만,
-                # 예시로 첫 토큰(:,0,:)이나 끝 토큰(:,-1,:)을 쓰는 경우가 있음
-                    embedding = hidden_states[:, 0, :]  # [CLS]라고 가정할 수도...
-                # -----------------------
-                # 1) Mean Pooling
-                # -----------------------
-                if self.pooling_mode == "mean":
-                    if attention_mask is None:
-                        # 단순 Mean Pooling
-                        embedding = hidden_states.mean(dim=1)
-                    else:
-                        mask_f = attention_mask.float()  # (B, L)
-                        masked_hidden = hidden_states * mask_f.unsqueeze(-1)  # (B, L, D)
-                        sum_hidden = masked_hidden.sum(dim=1)                 # (B, D)
-                        denom = mask_f.sum(dim=1, keepdim=True) + 1e-9
-                        embedding = sum_hidden / denom                        # (B, D)
+                # outputs = self.model(input_ids=input_ids, attention_mask=attention_mask, output_hidden_states=True)
 
-                # -----------------------
-                # 2) Max Pooling
-                # -----------------------
-                if self.pooling_mode == "max":
-                    if attention_mask is None:
-                        embedding, _ = hidden_states.max(dim=1)
-                    else:
-                        inf_mask = (1 - attention_mask) * (-1e9)
-                        inf_mask = inf_mask.unsqueeze(-1)     # (B, L, 1)
-                        masked_hidden = hidden_states + inf_mask
-                        embedding, _ = masked_hidden.max(dim=1)
-
-                # ----------------------------------------------------------------
-                # 3) Linear Attention Pooling [기존 코드와 유사]
-                # ----------------------------------------------------------------
-                if self.pooling_mode == "attention":
-                    if attention_mask is not None:
-                        # (B, L, 1)
-                        scores = self.attn_score_proj(hidden_states)          # -> (B, L, 1)
-                        scores = scores.squeeze(-1)                           # (B, L)
-                        scores = scores.masked_fill(attention_mask == 0, float('-inf'))
-                        attn_weights = F.softmax(scores, dim=1)               # (B, L)
-                        
-                        # (B, L, 1)
-                        attn_weights = attn_weights.unsqueeze(-1)
-                    
-                        weighted_hidden = hidden_states * attn_weights        # (B, L, D)
-                        embedding = weighted_hidden.sum(dim=1)                # (B, D)
-                    
-                    else:
-                        scores = self.attn_score_proj(hidden_states).squeeze(-1)  # (B, L)
-                        attn_weights = F.softmax(scores, dim=1)                    # (B, L)
-                        attn_weights = attn_weights.unsqueeze(-1)                  # (B, L, 1)
-                        weighted_hidden = hidden_states * attn_weights             # (B, L, D)
-                        embedding = weighted_hidden.sum(dim=1)                     # (B, D)
-
-
-                # ---------------------------------------
-                # MLP-based attention pooling
-                # ---------------------------------------
-                if self.pooling_mode == "learnable":
-                    # MLP로 score 계산
-                    scores = self.learnable_score_mlp(hidden_states).squeeze(-1)  # (B, L)
-                    if attention_mask is not None:
-                        scores = scores.masked_fill(attention_mask == 0, float('-inf'))
-
-                    attn_weights = F.softmax(scores, dim=1)  # (B, L)
-                    attn_weights = attn_weights.unsqueeze(-1)
-                    weighted_hidden = hidden_states * attn_weights
-                    embedding = weighted_hidden.sum(dim=1)
-
-
-                if self.pooling_mode == "mlp_multi_layers":
-                    
-                    all_layers = outputs.hidden_states
-                    # 1) bidirectional attention이면, [B, seq_len, d] 평균 등을 사용할 수도 있음
-                    #    causal이면 EOS 토큰 hidden_states[b, -1, :]
-                    #    여기서는 일단 'bidirectional + mean' 가정
-                    # => shape: (L, B, d)
-                    stack_of_means = []
-                    for layer_i in range(len(all_layers)):
-                        # mean pooling => (B, d)
-                        h_i_mean = all_layers[layer_i].mean(dim=1)
-                        stack_of_means.append(h_i_mean)
-                    # => (L, B, d)
-                    stack_of_means = torch.stack(stack_of_means, dim=0)
-                    
-                    x_layers = stack_of_means.permute(1,0,2)
-                    embedding = self.cross_attn_block(x_layers)
-
-                # ---------------------------------------
-                # (4) Downstream Projection Layer
-                #     (Mean Pooling -> MLP)
-                # ---------------------------------------
-                
-                
-                if self.pooling_mode == "proj":
-                    # 1) 혹시 마스크가 있다면, 토큰별 마스킹
-                    if attention_mask is not None:
-                        mask_f = attention_mask.float()          # (B, L)
-                        mask_3d = mask_f.unsqueeze(-1)           # (B, L, 1)
-                        hidden_states = hidden_states * mask_3d  # 0인 token 은 강제로 0
-                    
-                    # shape = (B, 128, 4096) 가정
-                    # 1차 청크: 128개를 8개씩 묶어 평균 => (B, 16, 4096)
-                    #   => 128=16*8
-                    print(hidden_states.shape)
-                    B, L, D = hidden_states.shape
-                    if L != 128:
-                        raise ValueError("예시 가정: L=128 이어야 함.")
-
-                    # (B, 16, 8, 4096)
-                    hidden_states = hidden_states.view(B, 16, 8, D)
-                    # (B,16,4096)
-                    hidden_states = hidden_states.mean(dim=2)
-
-                    # 2차 청크: (16→4) => (B,4,4096)
-                    hidden_states = hidden_states.view(B, 4, 4, D).mean(dim=2)
-
-                    # 3차 청크: (4→1) => (B,1,4096)
-                    hidden_states = hidden_states.view(B, 1, 4, D).mean(dim=2)
-
-                    # shape=(B,1,4096) => (B,4096)
-                    embedding = hidden_states.squeeze(1)
-
-                    # 여기서 optional로 4096->256 proj
-                    embedding = self.proj(embedding)  # shape=(B,256)
-                # if self.pooling_mode == "proj":
-                #     # 먼저 Mean Pooling
-                #     if attention_mask is not None:
-                #         mask_f = attention_mask.float()
-                #         masked_hidden = hidden_states * mask_f.unsqueeze(-1)
-                #         sum_hidden = masked_hidden.sum(dim=1)
-                #         denom = mask_f.sum(dim=1, keepdim=True) + 1e-9
-                #         pooled = sum_hidden / denom
-                #     else:
-                #         pooled = hidden_states.mean(dim=1)
-                #     # (hidden_dim->1024->256)
-                #     embedding = self.proj(pooled)  # (B, 256)
-
-                # ---------------------------------------
-                # (5) Pooling 이후 MLP (Max Pool -> 4096->1024->256->64->1)
-                # ---------------------------------------
-                if self.pooling_mode == "mlp_after_pooling":
-                    # Max Pool 먼저
-                    if attention_mask is None:
-                        pooled, _ = hidden_states.max(dim=1)  # (B, D=4096)
-                    else:
-                        inf_mask = (1 - attention_mask) * (-1e9)
-                        inf_mask = inf_mask.unsqueeze(-1)  # (B, L, 1)
-                        masked_hidden = hidden_states + inf_mask
-                        pooled, _ = masked_hidden.max(dim=1)
-                    # MLP
-                    logits = self.pooling_mlp(pooled)  # (B, 1)
-
-                # ---------------------------------------
-                # (6) Self-Attention Pooling (Learnable Query)
-                # ---------------------------------------
-                if self.pooling_mode == "query_attn":
-                    B = hidden_states.size(0)
-                    # query: (1, 1, D) -> (B, 1, D)
-                    query_batch = self.query.expand(B, -1, -1)
-
-                    Q = self.W_q(query_batch)      # (B,1,D)
-                    K = self.W_k(hidden_states)    # (B,L,D)
-                    V = self.W_v(hidden_states)    # (B,L,D)
-
-                    # (B,1,D) x (B,D,L) = (B,1,L)
-                    attn_scores = torch.bmm(Q, K.transpose(1,2)) / (self.hidden_dim ** 0.5)
-                    if attention_mask is not None:
-                        attn_scores = attn_scores.masked_fill(attention_mask.unsqueeze(1)==0, float('-inf'))
-
-                    attn_weights = F.softmax(attn_scores, dim=-1)  # (B,1,L)
-                    # (B,1,D) = (B,1,L) x (B,L,D)
-                    pooled = torch.bmm(attn_weights, V)
-                    embedding = pooled.squeeze(1)  # (B, D)
-
-                
-                
                 # hidden_states = outputs.hidden_states[-1]        # Shape: [batch_size, seq_len, hidden_dim]
                 # embedding = hidden_states.mean(dim=1)            # Shape: [batch_size, hidden_dim]
 
