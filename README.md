@@ -97,6 +97,11 @@ LLM으로부터 추출한 피처를 BERT에 입력하여 분류하는 비교 실
 - **이승재 (Seungjae Lee)** – LLM을 이용한 feature 추출
 - **윤종우 (JongWoo Yoon)** – BERT, Ko-BERT 모델 개발
 
+
+## 📂 Conference
+
+Kyu-haeng Lee, Seokbeom Lim, Ilju Lee, Ok Kim, Hyun Woo Jung, Sehwan Kim, Hee Jung Kim, Keunsoo Kang, and Jung Jae Lee, "Dementia Prediction Using Hierarchical Attention and Evaluation of Context Quality," Alzheimer’s Association International Conference (AAIC) 2025.
+
 ---
 
 
